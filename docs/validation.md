@@ -98,3 +98,9 @@ for both platform builds and the checksum job. The exact Windows x64 archive was
 confirmed in the upstream python-build-standalone release. Project metadata is
 0.1.1; the failed v0.1.0 tag is preserved. Native validation of this correction
 runs on the new v0.1.1 tag before publication.
+
+The next CI attempt identified that setup-uv's optional `python-arch` input needs
+an uv feature newer than the pinned 0.12.19. Removing the input uses the x64
+runner's native architecture and retains every runtime/dependency pin. The fix
+is verified through a build-only workflow run on main before the next release
+tag (v0.1.2); failed tags remain unchanged and no release was published by them.

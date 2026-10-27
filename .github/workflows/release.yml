@@ -50,7 +50,6 @@ jobs:
         with:
           version: "0.12.19"
           python-version: "3.12.14"
-          python-arch: x86_64
           enable-cache: true
           cache-dependency-glob: uv.lock
 
@@ -131,7 +130,6 @@ jobs:
         with:
           version: "0.12.19"
           python-version: "3.12.14"
-          python-arch: x86_64
           enable-cache: false
 
       - name: Install pinned managed Python
