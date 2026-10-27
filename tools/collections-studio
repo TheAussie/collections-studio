@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+studio_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+studio_python="${COLLECTIONS_STUDIO_PYTHON:-}"
+if [[ -z "$studio_python" ]]; then
+    # The system Tk includes desktop font rendering and Unicode fallback.
+    # Some standalone Python distributions ship Tk with only a bitmap font.
+    if [[ -x /usr/bin/python3 ]]; then
+        studio_python=/usr/bin/python3
+    else
+        studio_python=python3
+    fi
+fi
+exec "$studio_python" "$studio_root/tools/collection_studio.py" "$@"

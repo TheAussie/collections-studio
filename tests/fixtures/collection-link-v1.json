@@ -1,0 +1,29 @@
+{
+  "Format": "maps-collection",
+  "Version": 1,
+  "ExportedAt": "2026-10-26T00:00:00+00:00",
+  "CollectionCount": 2,
+  "MembershipCount": 1,
+  "Collections": [
+    {
+      "Name": "Favourites",
+      "Hashes": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    },
+    {
+      "Name": "Empty 星",
+      "Hashes": []
+    }
+  ],
+  "Beatmaps": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "Title": "A song worth sharing",
+      "Artist": "An artist",
+      "Difficulty": "Insane",
+      "Mode": "osu",
+      "BeatmapId": 123,
+      "Available": false
+    }
+  }
+}

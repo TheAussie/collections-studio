@@ -1,0 +1,30 @@
+[
+  {
+    "Module": "qtbase",
+    "Version": "6.12.0",
+    "Url": "https://codeload.github.com/qt/qtbase/tar.gz/refs/tags/v6.12.0",
+    "Sha256": "dff6570582c272cbe744d2e460700318262af505460f4215276459970ae31b46",
+    "Archive": "qtbase-6.12.0.tar.gz"
+  },
+  {
+    "Module": "qtsvg",
+    "Version": "6.12.0",
+    "Url": "https://codeload.github.com/qt/qtsvg/tar.gz/refs/tags/v6.12.0",
+    "Sha256": "38d440c4e97c90ce4f5b76c65dcd63d716d2ef4852baa6fb0926fb94bb96ea66",
+    "Archive": "qtsvg-6.12.0.tar.gz"
+  },
+  {
+    "Module": "qtwayland",
+    "Version": "6.12.0",
+    "Url": "https://codeload.github.com/qt/qtwayland/tar.gz/refs/tags/v6.12.0",
+    "Sha256": "6a6ac145aaf34ab742f85ff79d688c5bab9160a1da32e7855c8e7278ff774f3c",
+    "Archive": "qtwayland-6.12.0.tar.gz"
+  },
+  {
+    "Module": "pyside-setup",
+    "Version": "6.12.0",
+    "Url": "https://codeload.github.com/pyside/pyside-setup/tar.gz/refs/tags/v6.12.0",
+    "Sha256": "dce2a944b34320e51a0ec8100cb983956399b97dec386f0fbe39e1b52571a336",
+    "Archive": "pyside-setup-6.12.0.tar.gz"
+  }
+]
