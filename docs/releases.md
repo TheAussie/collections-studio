@@ -1,7 +1,10 @@
 # Windows and Linux releases
 
 The GitHub Actions workflow `.github/workflows/release.yml` builds natively on
-Windows Server 2022 x64 and Ubuntu 22.04 x64. The output applications are:
+the repository's Windows Server 2022 x64 and Ubuntu 22.04 x64 self-hosted runners.
+Their names/custom labels are `collections-studio-windows` and
+`collections-studio-linux`; both also need their default self-hosted, OS and X64
+labels. The output applications are:
 
 - `CollectionsStudio-windows-x64.exe`: one portable Windows executable, with no installer.
 - `CollectionsStudio-linux-x64`: one Linux executable, with no AppImage or FUSE requirement.
@@ -12,6 +15,25 @@ installation. This is not a fully static Linux executable: glibc 2.35+ and norma
 desktop/OpenGL/X11/Wayland system libraries are required. The temporary directory
 must permit execution. On Linux, run `chmod +x CollectionsStudio-linux-x64` after
 downloading, then `./CollectionsStudio-linux-x64`.
+
+## Build VM setup
+
+Each runner uses its own installation/work directory and service. Windows needs
+a machine-wide Git for Windows installation, including Git Bash, accessible to
+the runner service account. The workflow locates Git Bash without changing the
+VM's global PATH. On Ubuntu, install Qt/X11/OpenGL runtime libraries, Tcl/Tk,
+`xvfb` and `xauth` once as an administrator; jobs check these tools and do not run
+sudo or apt. Python and the pinned .NET SDK are installed in writable locations
+by the workflow; no administrator service account is required for building.
+The output path includes the run ID/attempt so an interrupted old build cannot
+collide with a later build.
+
+The build jobs receive read-only repository permissions. The tagged publication
+job stays on GitHub-hosted Ubuntu and receives contents-write permission only
+after both builds pass. This workflow accepts trusted manual runs and version
+tags; it has no pull-request trigger. Keep public-repository runner jobs away
+from production credentials/data; separate installation directories do not
+isolate jobs sharing the same OS account or VM.
 
 ## Triggering a build or release
 

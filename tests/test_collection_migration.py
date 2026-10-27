@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,8 @@ def test_realm_export_includes_staged_edits_and_selected_empty_unicode_collectio
     assert workspace.collection("two")["Hashes"] == []
     assert workspace.dirty
     assert digest(workspace.source_path) == workspace.source_hash
-    assert Path(report["OutputFile"]).stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":
+        assert Path(report["OutputFile"]).stat().st_mode & 0o777 == 0o600
     assert json.loads(Path(report["ReportPath"]).read_text())["OutputFile"] == report["OutputFile"]
 
 

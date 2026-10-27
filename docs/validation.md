@@ -104,3 +104,25 @@ an uv feature newer than the pinned 0.12.19. Removing the input uses the x64
 runner's native architecture and retains every runtime/dependency pin. The fix
 is verified through a build-only workflow run on main before the next release
 tag (v0.1.2); failed tags remain unchanged and no release was published by them.
+
+## Self-hosted VM preparation and Windows test portability
+
+The owner registered separate Windows Server 2022 x64 and Ubuntu 22.04.5 x64
+runners for this repository. Both were verified online/idle with their intended
+custom labels. The owner verified Xvfb after installing Ubuntu desktop libraries.
+The failed v0.1.0/v0.1.1 tags were removed at the owner's request, with no release
+published; project/lock metadata now starts again at 0.1.0.
+
+The earlier Windows run reached tests: 215 passed, 3 skipped, and 4 failed on
+platform assumptions. Three failures asserted Unix 0600 mode bits on Windows;
+those assertions now run on POSIX while retaining the content/resume/export
+checks on Windows. The fourth changed an mtime by one nanosecond, below NTFS
+precision; it now uses a representable two-second change and verifies that the
+mtime actually changed before checking stale-cache rejection. Runtime behavior
+is unchanged. The next build-only run validates the corrected tests and native
+packages on the new runners before any release tag is recreated.
+
+Local verification after these changes: all 222 tests passed without skips;
+Ruff lint/format, the frozen offline lock check, workflow YAML/label/permission
+checks and Bash syntax checks passed. Native VM validation is performed by a
+manual build-only workflow run; that event cannot execute the publication job.

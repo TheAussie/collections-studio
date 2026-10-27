@@ -196,7 +196,9 @@ def test_replay_parser_cache_contract_skips_stale_and_never_rehashes(tmp_path):
     assert set(result["Beatmaps"]) == {A}
     assert result["ErrorCount"] == 1
     assert cache.read_bytes() == original
-    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+    # NTFS timestamps have coarser precision than a one-nanosecond change.
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+    assert path.stat().st_mtime_ns != info.st_mtime_ns
     assert not read_replay_cache(cache)["Beatmaps"]
 
 

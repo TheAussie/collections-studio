@@ -30,16 +30,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-2022
+          - runner: [self-hosted, Windows, X64, collections-studio-windows]
             rid: win-x64
             source_args: ""
-          - runner: ubuntu-22.04
+          - runner: [self-hosted, Linux, X64, collections-studio-linux]
             rid: linux-x64
             source_args: --include-qt-sources
     defaults:
       run:
         shell: bash
     steps:
+      - name: Find Git Bash on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $candidates = @((Join-Path $env:ProgramFiles 'Git\bin\bash.exe'))
+          $git = Get-Command git.exe -ErrorAction SilentlyContinue
+          if ($git) {
+            $gitRoot = Split-Path (Split-Path $git.Source -Parent) -Parent
+            $candidates += Join-Path $gitRoot 'bin\bash.exe'
+          }
+          $bash = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $bash) { throw 'Install Git for Windows system-wide, then restart this runner service.' }
+          Split-Path $bash -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Check out release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,15 +74,14 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: desktop/global.json
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
 
-      - name: Install Linux display and native libraries
+      - name: Check Linux display tooling
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            libegl1 libgl1 libopengl0 libxkbcommon0 libxkbcommon-x11-0 \
-            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 tk8.6 xvfb xauth
+          command -v xvfb-run
+          command -v xauth
 
       - name: Install locked Python dependencies
         run: uv sync --frozen --extra desktop --extra desktop-build --python 3.12.14
@@ -80,23 +93,23 @@ jobs:
 
       - name: Run desktop tests on Linux
         if: runner.os == 'Linux'
-        run: xvfb-run -a uv run --frozen --extra desktop --extra desktop-build pytest -q --tb=short
+        run: xvfb-run -a uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short
 
       - name: Run desktop tests on Windows
         if: runner.os == 'Windows'
-        run: uv run --frozen --extra desktop --extra desktop-build pytest -q --tb=short
+        run: uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short
 
       - name: Build and self-test standalone executable
         run: >-
           uv run --frozen --extra desktop --extra desktop-build
           python desktop/build_desktop.py --onefile
-          --rid "${{ matrix.rid }}" --output "$RUNNER_TEMP/cs-build"
+          --rid "${{ matrix.rid }}" --output "$RUNNER_TEMP/cs-build-${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Stage executable, notices and corresponding sources
         run: >-
           uv run --frozen --extra desktop --extra desktop-build
           python desktop/package_release.py stage
-          --build "$RUNNER_TEMP/cs-build" --rid "${{ matrix.rid }}"
+          --build "$RUNNER_TEMP/cs-build-${{ github.run_id }}-${{ github.run_attempt }}" --rid "${{ matrix.rid }}"
           --output artifacts/release ${{ matrix.source_args }}
 
       - name: Upload verified release files

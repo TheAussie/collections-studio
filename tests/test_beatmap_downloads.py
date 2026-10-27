@@ -134,7 +134,8 @@ def test_existing_downloads_are_reused_without_network(tmp_path):
     report = offline.run([B], tmp_path)
     assert report["results"][0]["state"] == "Ready"
     assert not offline.client.calls
-    assert (tmp_path / "7.osz").stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":
+        assert (tmp_path / "7.osz").stat().st_mode & 0o777 == 0o600
 
 
 def test_resume_restores_completed_maps_without_opening_any_zip_or_using_network(
@@ -286,7 +287,8 @@ def test_cancel_and_fresh_process_resume_preserves_completed_and_untouched_maps(
     saved = downloads.read_download_queue(tmp_path)
     assert saved["hashes"] == hashes  # Includes the third, never-started map.
     assert saved["mirrors"] == ["One"]
-    assert Path(paused["queue_path"]).stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":
+        assert Path(paused["queue_path"]).stat().st_mode & 0o777 == 0o600
     original_archive = (tmp_path / "7.osz").read_bytes()
     assert not list(tmp_path.glob("*.part"))
 
