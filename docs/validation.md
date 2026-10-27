@@ -86,3 +86,15 @@ created by this local work, and web/production/game data was unchanged.
   were reviewed as synthetic test inputs.
 - Native CI builds and release publication are the next verification stage;
   this local run does not establish manual Windows acceptance.
+
+## First native CI run and Python setup correction
+
+The first `v0.1.0` workflow completed the Linux native build successfully. Windows
+stopped at actions/setup-python because its Windows catalogue lacks CPython
+3.12.14. The release job was skipped, so that attempt published no release.
+
+The corrected workflow keeps CPython 3.12.14 and uses uv's managed distributions
+for both platform builds and the checksum job. The exact Windows x64 archive was
+confirmed in the upstream python-build-standalone release. Project metadata is
+0.1.1; the failed v0.1.0 tag is preserved. Native validation of this correction
+runs on the new v0.1.1 tag before publication.

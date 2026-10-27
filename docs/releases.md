@@ -23,7 +23,9 @@ creates a prerelease. Existing releases/assets are not overwritten by reruns.
 No custom token is needed; only the release job receives `contents: write`.
 Creating this workflow locally does not run it, create a tag, or publish anything.
 
-The workflow pins CPython 3.12.14, uv 0.12.19, .NET SDK 10.0.112, runtime 8.0.31,
+The workflow installs CPython 3.12.14 through uv's managed distributions on both
+platforms. This version is available for Windows through uv, although it is absent
+from actions/setup-python's Windows catalogue. It pins uv 0.12.19, .NET SDK 10.0.112, runtime 8.0.31,
 the project's Python/NuGet/source locks, and all actions to verified commit SHAs.
 Both platforms run the desktop suite and the resulting executable's disposable
 `--self-test`. This includes the native Realm assertions and in-app licence/credits
