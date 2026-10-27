@@ -93,11 +93,11 @@ jobs:
 
       - name: Run desktop tests on Linux
         if: runner.os == 'Linux'
-        run: xvfb-run -a uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short
+        run: xvfb-run -a uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short --basetemp "$RUNNER_TEMP/pt"
 
       - name: Run desktop tests on Windows
         if: runner.os == 'Windows'
-        run: uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short
+        run: uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short --basetemp "$RUNNER_TEMP/pt"
 
       - name: Build and self-test standalone executable
         run: >-

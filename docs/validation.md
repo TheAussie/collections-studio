@@ -126,3 +126,12 @@ Local verification after these changes: all 222 tests passed without skips;
 Ruff lint/format, the frozen offline lock check, workflow YAML/label/permission
 checks and Bash syntax checks passed. Native VM validation is performed by a
 manual build-only workflow run; that event cannot execute the publication job.
+
+The first self-hosted check reached tests on both VMs. Ubuntu passed 221 tests;
+Windows passed 217 with the three documented platform skips. A cache-invalidation
+fixture on both VMs rewrote an archive within the same filesystem clock tick;
+it now waits for an observable change timestamp while explicitly retaining the
+original size/mtime before asserting rejection. Windows also exposed the longer
+NETWORK SERVICE temporary-profile prefix in the NuGet notice fixture. CI now
+uses a short pytest base directory inside the dedicated runner's temp directory;
+the full package-ID/notice-preservation and MAX_PATH assertions remain unchanged.

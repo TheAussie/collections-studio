@@ -3,6 +3,7 @@ import io
 import json
 import os
 import threading
+import time
 import urllib.error
 import urllib.request
 import urllib.response
@@ -195,8 +196,19 @@ def test_changed_archive_with_preserved_size_and_mtime_is_rechecked(tmp_path, mo
     engine(routes, (ONE,)).run([A], tmp_path)
     path = tmp_path / "7.osz"
     previous = path.stat()
-    path.write_bytes(b"x" * previous.st_size)
-    os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    signature = downloads._archive_signature(path)
+    deadline = time.monotonic() + 2
+    while True:
+        path.write_bytes(b"x" * previous.st_size)
+        os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        if downloads._archive_signature(path) != signature:
+            break
+        if time.monotonic() >= deadline:
+            pytest.fail("The filesystem did not expose a distinct archive change timestamp.")
+        # Older kernels/Windows can record several writes in one clock tick.
+        time.sleep(0.02)
+    assert path.stat().st_size == previous.st_size
+    assert path.stat().st_mtime_ns == previous.st_mtime_ns
     assert not downloads.load_download_progress(tmp_path)["completed"]
     inspected = []
     original = downloads.inspect_archive
