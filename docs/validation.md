@@ -135,3 +135,18 @@ original size/mtime before asserting rejection. Windows also exposed the longer
 NETWORK SERVICE temporary-profile prefix in the NuGet notice fixture. CI now
 uses a short pytest base directory inside the dedicated runner's temp directory;
 the full package-ID/notice-preservation and MAX_PATH assertions remain unchanged.
+
+## Native build-only validation passed on the dedicated VMs
+
+GitHub Actions run 40450736982 passed at commit
+1b409ddc4acbdcedb3c772da295911021363e7aa. The Ubuntu 22.04.5 x64 runner passed
+all 222 tests. The Windows Server 2022 x64 runner passed 219 tests and skipped
+three fixtures: Windows symlink creation without developer mode, a POSIX-only
+symlink fixture, and the native Windows lock acceptance fixture. Both platforms
+then built their actual one-file executable, passed the mandatory frozen
+self-test, staged the platform notices and matching sources, and uploaded their
+release artifacts. This manual run published no release. Manual Windows UI/DPI,
+clean-machine and game-database locking acceptance remain pending.
+
+The owner-requested first release tag is v0.1.0. Its tag-triggered workflow repeats
+native verification and publishes only after both platform jobs succeed.
