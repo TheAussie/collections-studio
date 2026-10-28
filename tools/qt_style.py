@@ -21,6 +21,10 @@ QPushButton:focus, QToolButton:focus { border: 1px solid #aa93c4; }
 QPushButton#primary { background: #85719f; color: #ffffff; font-weight: 600; }
 QPushButton#primary:hover { background: #9580af; }
 QPushButton#quiet { background: transparent; color: #b9b4c3; }
+QPushButton#navigation:enabled { background: #35303f; color: #f2edf8;
+    border: 1px solid #8e79a6; font-weight: 600; }
+QPushButton#navigation:enabled:hover { background: #494057; border-color: #b6a0ce; }
+QPushButton#navigation:checked { background: #554568; }
 QPushButton#danger { background: transparent; color: #d5a7ae; }
 QPushButton:disabled, QToolButton:disabled { color: #716e7b; background: #25242b; }
 QLineEdit, QComboBox { background: #292830; border: 1px solid transparent;

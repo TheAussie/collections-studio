@@ -34,7 +34,19 @@ def map_values(checksum, metadata, present, downloaded=None):
     )
 
 
-def map_order(hashes, metadata, present, query, status, column, descending, stop, downloaded=None):
+def map_order(
+    hashes,
+    metadata,
+    present,
+    query,
+    status,
+    column,
+    descending,
+    stop,
+    downloaded=None,
+    collection_hashes=None,
+    exclude_existing=False,
+):
     """Search/sort large collections in a worker using immutable membership snapshots."""
     query = query.casefold().strip()
     rows = []
@@ -42,6 +54,11 @@ def map_order(hashes, metadata, present, query, status, column, descending, stop
         if index % 256 == 0 and stop.is_set():
             raise Cancelled()
         values = map_values(checksum, metadata, present, downloaded)
+        if collection_hashes is not None:
+            already = checksum.lower() in collection_hashes
+            if exclude_existing and already:
+                continue
+            values = (*values, "Already in collection" if already else "Not in collection")
         if status != "All maps" and values[3] != status:
             continue
         if query and query not in (" ".join(map(str, values)) + " " + checksum).casefold():
@@ -101,12 +118,16 @@ class BeatmapModel(QAbstractTableModel):
         self.hashes, self.order = (), []
         self.metadata, self.present = {}, set()
         self.downloaded = {}
+        self.collection_hashes = None
 
-    def replace(self, hashes, metadata, present, order=None, downloaded=None):
+    def replace(
+        self, hashes, metadata, present, order=None, downloaded=None, collection_hashes=None
+    ):
         self.beginResetModel()
         self.hashes = tuple(hashes)
         self.metadata, self.present = metadata, present
         self.downloaded = downloaded or {}
+        self.collection_hashes = collection_hashes
         self.order = list(range(len(hashes))) if order is None else order
         self.endResetModel()
 
@@ -119,11 +140,11 @@ class BeatmapModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.order)
 
     def columnCount(self, parent=ROOT_INDEX):
-        return 0 if parent.isValid() else 4
+        return 0 if parent.isValid() else 4 if self.collection_hashes is None else 5
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return self.HEADERS[section]
+            return (*self.HEADERS, "IN THIS COLLECTION")[section]
         return None
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
@@ -133,6 +154,13 @@ class BeatmapModel(QAbstractTableModel):
         if role == HASH_ROLE:
             return checksum
         values = map_values(checksum, self.metadata, self.present, self.downloaded)
+        if self.collection_hashes is not None:
+            values = (
+                *values,
+                "Already in collection"
+                if checksum.lower() in self.collection_hashes
+                else "Not in collection",
+            )
         if role == Qt.ItemDataRole.DisplayRole:
             return values[index.column()]
         if role == Qt.ItemDataRole.ToolTipRole:

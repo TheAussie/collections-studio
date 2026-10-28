@@ -1,6 +1,7 @@
 """Collections Studio desktop manager with download and migration dialogs."""
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import (  # noqa: E402
+    QEvent,
     QSettings,
     QSignalBlocker,
     QSortFilterProxyModel,
@@ -24,7 +26,9 @@ from PySide6.QtGui import QAction, QKeySequence  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -44,6 +48,8 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
+from tools.app_updates import check_for_update  # noqa: E402
+from tools.app_version import current_version  # noqa: E402
 from tools.beatmap_downloads import Cancelled  # noqa: E402
 from tools.collection_application import (  # noqa: E402
     fetch_cancellable_link,
@@ -53,6 +59,7 @@ from tools.collection_application import (  # noqa: E402
 from tools.collection_backend import Backend  # noqa: E402
 from tools.collection_save import save_open_workspace  # noqa: E402
 from tools.collection_workspace import Workspace  # noqa: E402
+from tools.library_cache import cache_database_inventory, library_key  # noqa: E402
 from tools.qt_credits_dialog import CreditsDialog  # noqa: E402
 from tools.qt_dialog_support import finish_shutdown  # noqa: E402
 from tools.qt_jobs import Job  # noqa: E402
@@ -76,7 +83,12 @@ class StudioWindow(QMainWindow):
         self.backend = backend or Backend()
         self.settings = settings or QSettings("CollectionsStudio", "QtPreview")
         self.workspace = None
+        self.version = current_version()
+        self.available_update = None
+        self.update_dialog = self.update_check_job = None
+        self._restarting_for_update = False
         self.selected = None
+        self.library_mode = False
         self.last_import_ids = set()
         self.download_dialog = self.migration_dialog = None
         self.credits_dialog = None
@@ -97,6 +109,9 @@ class StudioWindow(QMainWindow):
         self.filter_timer.setSingleShot(True)
         self.filter_timer.setInterval(180)
         self.filter_timer.timeout.connect(self.filter_maps)
+        self.map_width_timer = QTimer(self)
+        self.map_width_timer.setSingleShot(True)
+        self.map_width_timer.timeout.connect(self.fit_map_column)
         self.setWindowTitle(APP_TITLE)
         self.resize(1360, 900)
         self.setMinimumSize(960, 640)
@@ -122,6 +137,9 @@ class StudioWindow(QMainWindow):
         brand.addWidget(label("A place for every map."))
         top.addLayout(brand)
         top.addStretch()
+        self.update_notice = button("Update available", self.show_updates, "primary")
+        self.update_notice.hide()
+        top.addWidget(self.update_notice)
         self.open_button = button("Open…", self.open_file)
         self.import_button = QToolButton()
         self.import_button.setText("Import")
@@ -146,6 +164,7 @@ class StudioWindow(QMainWindow):
         self.download_action = tools.addAction("Get missing maps…", self.download_maps)
         self.migrate_action = tools.addAction("Migrate collections…", self.migrate_collections)
         tools.addSeparator()
+        tools.addAction("Check for updates…", self.show_updates)
         tools.addAction("Credits and licences…", self.show_credits)
         tools.addAction("About Collections Studio…", self.about)
         self.tools_button.setMenu(tools)
@@ -211,7 +230,15 @@ class StudioWindow(QMainWindow):
         content.setSpacing(12)
         self.heading = label("Your collection library", "heading")
         self.heading.setWordWrap(True)
-        content.addWidget(self.heading)
+        heading_row = QHBoxLayout()
+        heading_row.addWidget(self.heading, 1)
+        self.browse_button = button("Browse songs →", self.toggle_library, "navigation")
+        self.browse_button.setCheckable(True)
+        self.browse_button.setToolTip(
+            "Browse the loaded game inventory and add beatmaps to this collection."
+        )
+        heading_row.addWidget(self.browse_button)
+        content.addLayout(heading_row)
         self.collection_summary = label("Open a collection database to get started.")
         content.addWidget(self.collection_summary)
         searches = QHBoxLayout()
@@ -229,9 +256,17 @@ class StudioWindow(QMainWindow):
         searches.addWidget(self.map_search, 1)
         searches.addWidget(self.status_filter)
         content.addLayout(searches)
+        self.not_in_collection = QCheckBox("Not already in this collection")
+        self.not_in_collection.setChecked(True)
+        self.not_in_collection.toggled.connect(lambda: self.filter_timer.start())
+        content.addWidget(self.not_in_collection)
         self.body = QSplitter(Qt.Orientation.Vertical)
         self.stack = QStackedWidget()
         self.maps = self._table(self.map_model)
+        self.maps.viewport().installEventFilter(self)
+        self.maps.horizontalHeader().sectionResized.connect(
+            lambda *_args: self.map_width_timer.start()
+        )
         self.maps.setSortingEnabled(True)
         self.maps.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         self.maps.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -253,6 +288,13 @@ class StudioWindow(QMainWindow):
         self.empty_text.setWordWrap(True)
         empty_layout.addWidget(self.empty_heading)
         empty_layout.addWidget(self.empty_text)
+        inventory_actions = QHBoxLayout()
+        self.inventory_database_button = button("Read osu!.db…", self.read_database)
+        self.inventory_scan_button = button("Scan Songs folder…", self.scan_folder)
+        inventory_actions.addWidget(self.inventory_database_button)
+        inventory_actions.addWidget(self.inventory_scan_button)
+        inventory_actions.addStretch()
+        empty_layout.addLayout(inventory_actions)
         empty_layout.addStretch()
         self.stack.addWidget(empty)
         self.body.addWidget(self.stack)
@@ -274,17 +316,25 @@ class StudioWindow(QMainWindow):
         self.selection_label = label("0 selected")
         self.select_all_button = button("Select all", self.maps.selectAll, "quiet")
         self.remove_button = button("Remove from collection", self.remove_maps, "danger")
+        self.copy_button = button("Copy to…", lambda: self.transfer_maps(move=False), "quiet")
+        self.move_button = button("Move to…", lambda: self.transfer_maps(move=True), "quiet")
+        self.add_library_button = button(
+            "Add selected to collection", self.add_library_maps, "primary"
+        )
         selection_bar.addWidget(self.selection_label)
         selection_bar.addStretch()
         selection_bar.addWidget(self.select_all_button)
+        selection_bar.addWidget(self.copy_button)
+        selection_bar.addWidget(self.move_button)
         selection_bar.addWidget(self.remove_button)
+        selection_bar.addWidget(self.add_library_button)
         content.addLayout(selection_bar)
         self.splitter.addWidget(right)
         self.splitter.setSizes([280, 1000])
         self.splitter.setStretchFactor(1, 1)
         outer.addWidget(self.splitter, 1)
         footer = QHBoxLayout()
-        self.status = label("All edits stay in the working copy until you save a new file.")
+        self.status = label("Collection edits stay in memory until Save. Song files stay in place.")
         self.status.setWordWrap(True)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -306,6 +356,27 @@ class StudioWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
             action.triggered.connect(callback)
             self.addAction(action)
+
+    def eventFilter(self, watched, event):
+        if (
+            not self._closed
+            and watched is self.maps.viewport()
+            and event.type() == QEvent.Type.Resize
+        ):
+            self.map_width_timer.start()
+        return super().eventFilter(watched, event)
+
+    def fit_map_column(self):
+        if self._closed or not self.library_mode or self.map_model.columnCount() != 5:
+            return
+        other_width = sum(
+            self.maps.columnWidth(column)
+            for column in range(1, self.map_model.columnCount())
+            if not self.maps.isColumnHidden(column)
+        )
+        width = max(320, self.maps.viewport().width() - other_width)
+        if self.maps.columnWidth(0) != width:
+            self.maps.setColumnWidth(0, width)
 
     def _table(self, model):
         table = QTableView()
@@ -331,6 +402,7 @@ class StudioWindow(QMainWindow):
             self.job is not None
             or self.download_dialog is not None
             or self.migration_dialog is not None
+            or self.update_dialog is not None
         )
         loaded = self.workspace is not None and not blocked
         selected = loaded and self.selected is not None
@@ -339,6 +411,7 @@ class StudioWindow(QMainWindow):
         for widget in (self.rename_button, self.delete_button):
             widget.setEnabled(selected)
         self.open_button.setEnabled(not blocked)
+        self.update_notice.setEnabled(not blocked)
         self.tools_button.setEnabled(not blocked)
         self.collections.setEnabled(not blocked)
         self.download_action.setEnabled(loaded)
@@ -350,6 +423,38 @@ class StudioWindow(QMainWindow):
         self.undo_button.setEnabled(loaded and self.workspace.can_undo)
         self.select_all_button.setEnabled(selected and self.map_model.rowCount() > 0)
         self.remove_button.setEnabled(selected and bool(self.maps.selectionModel().selectedRows()))
+        self.browse_button.setEnabled(selected)
+        self.browse_button.setChecked(self.library_mode)
+        self.browse_button.setText(
+            "← Back to collection" if self.library_mode else "Browse songs →"
+        )
+        self.browse_button.setToolTip(
+            "Return to the beatmaps in this collection."
+            if self.library_mode
+            else "Browse the loaded game inventory and add beatmaps to this collection."
+        )
+        self.not_in_collection.setVisible(self.library_mode)
+        self.not_in_collection.setEnabled(selected)
+        selection = selected and bool(self.maps.selectionModel().selectedRows())
+        for control in (self.copy_button, self.move_button, self.remove_button):
+            control.setVisible(not self.library_mode)
+        for control in (self.copy_button, self.move_button):
+            control.setEnabled(selection and len(self.workspace.collections) > 1)
+            control.setToolTip(
+                "Select maps and choose another collection. Create a collection first if needed."
+            )
+        self.add_library_button.setVisible(self.library_mode)
+        self.add_library_button.setEnabled(selection and self.library_mode)
+        for control in (self.inventory_database_button, self.inventory_scan_button):
+            control.setVisible(
+                bool(
+                    self.library_mode
+                    and self.workspace
+                    and self.workspace.format == "stable"
+                    and not self.workspace.library_hashes
+                )
+            )
+            control.setEnabled(loaded and self.workspace.format == "stable")
         for action in self.library_actions:
             action.setEnabled(loaded and self.workspace.format == "stable")
         if self.workspace:
@@ -410,31 +515,77 @@ class StudioWindow(QMainWindow):
         group = (
             self.workspace.collection(self.selected) if self.workspace and self.selected else None
         )
+        if not self.library_mode and self.sort_column >= 4:
+            self.sort_column, self.sort_descending = -1, False
+            self.maps.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        hashes = (
+            tuple(self.workspace.library_hashes)
+            if group and self.library_mode
+            else group["Hashes"]
+            if group
+            else []
+        )
         self.map_model.replace(
-            group["Hashes"] if group else [],
+            hashes,
             self.workspace.beatmaps if self.workspace else {},
             self.workspace.present_hashes if self.workspace else set(),
             downloaded=self.workspace.downloaded if self.workspace else {},
+            collection_hashes={value.lower() for value in group["Hashes"]}
+            if group and self.library_mode
+            else None,
+            order=[] if self.library_mode else None,
         )
-        self.heading.setText(group["Name"] if group else "Your collection library")
+        self.heading.setText(
+            ("Game library → " if self.library_mode else "") + group["Name"]
+            if group
+            else "Your collection library"
+        )
         self.collection_summary.setText(
-            f"{len(group['Hashes']):,} maps · Exact difficulty memberships"
+            (
+                f"{len(hashes):,} indexed beatmaps · Add to this collection"
+                if self.library_mode
+                else f"{len(group['Hashes']):,} maps · Exact difficulty memberships"
+            )
             if group
             else "Open a database or create a new collection.db from Tools."
         )
-        self.stack.setCurrentIndex(0 if group and group["Hashes"] else 1)
+        self.stack.setCurrentIndex(0 if group and hashes and not self.library_mode else 1)
         self.empty_heading.setText(
             "This collection is empty" if group else "Build your collection library"
         )
         self.empty_text.setText(
-            "Import a collection.db or a collection link to add memberships."
+            "Browse songs to add from your game library, or import a collection.db or link."
             if group
             else "Open a stable collection.db or a copied lazer client.realm,\n"
             "or start with a new collection.db from Tools."
         )
+        if group and self.library_mode:
+            self.empty_heading.setText(
+                "Searching the game library…" if hashes else "Load your game library"
+            )
+            self.empty_text.setText(
+                "Search and select beatmaps, then add them to the named collection."
+                if hashes
+                else "Read osu!.db or scan your Songs folder to browse installed beatmaps."
+                if self.workspace.format == "stable"
+                else "This Realm contains no indexed beatmaps."
+            )
+            # Fill spare width while retaining readable titles and scrolling on small screens.
+            self.maps.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            self.maps.setColumnWidth(4, 170)
+            self.map_width_timer.start()
+        else:
+            self.maps.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.select_map()
-        if group and (
-            self.map_search.text() or self.status_filter.currentIndex() or self.sort_column >= 0
+        if (
+            group
+            and (not self.library_mode or hashes)
+            and (
+                self.map_search.text()
+                or self.status_filter.currentIndex()
+                or self.sort_column >= 0
+                or (self.library_mode and hashes)
+            )
         ):
             self.filter_timer.start()
 
@@ -453,9 +604,25 @@ class StudioWindow(QMainWindow):
         downloaded = dict(self.workspace.downloaded)
         query, status = self.map_search.text(), self.status_filter.currentText()
         column, descending = self.sort_column, self.sort_descending
+        collection_hashes = (
+            frozenset(value.lower() for value in self.workspace.collection(self.selected)["Hashes"])
+            if self.library_mode
+            else None
+        )
+        exclude_existing = self.library_mode and self.not_in_collection.isChecked()
         self.row_job = Job(
             lambda stop, _progress: map_order(
-                hashes, metadata, present, query, status, column, descending, stop, downloaded
+                hashes,
+                metadata,
+                present,
+                query,
+                status,
+                column,
+                descending,
+                stop,
+                downloaded,
+                collection_hashes,
+                exclude_existing,
             )
         )
         self._row_context = (self.workspace, self.selected, self._view_generation)
@@ -473,12 +640,24 @@ class StudioWindow(QMainWindow):
             return
         self.map_model.reorder(order)
         self.collection_summary.setText(
-            f"{len(order):,} of {len(self.map_model.hashes):,} maps · Exact difficulty memberships"
+            f"{len(order):,} of {len(self.map_model.hashes):,} "
+            + (
+                "indexed songs · Add to this collection"
+                if self.library_mode
+                else "maps · Exact difficulty memberships"
+            )
         )
         self.stack.setCurrentIndex(0 if order else 1)
         if not order:
             self.empty_heading.setText("No matching maps")
-            self.empty_text.setText("Try a different search or availability filter.")
+            self.empty_text.setText(
+                "Try a different search or availability filter."
+                + (
+                    " Turn off Not already in this collection to see added maps."
+                    if self.library_mode
+                    else ""
+                )
+            )
         self.select_map()
         self._controls()
 
@@ -522,14 +701,15 @@ class StudioWindow(QMainWindow):
                 )
                 + "Working from: "
                 + source
-                + "\nEdits stay in memory. Saving creates a separate verified file."
+                + "\nEdits stay in memory. Save verifies memberships and backs up existing files."
             )
         self.details.setPlainText(text)
         self._controls()
 
     def _discard_ok(self):
         return (
-            not self.workspace
+            self._restarting_for_update
+            or not self.workspace
             or not self.workspace.dirty
             or QMessageBox.question(
                 self,
@@ -547,6 +727,9 @@ class StudioWindow(QMainWindow):
             {"Format": "stable", "Version": 20261026, "SourceRealmSha256": "", "Collections": []},
             "",
         )
+        self.library_mode = False
+        self.map_search.clear()
+        self.status_filter.setCurrentIndex(0)
         self.selected = None
         self.last_import_ids.clear()
         self.collection_search.clear()
@@ -582,9 +765,24 @@ class StudioWindow(QMainWindow):
         ):
             return
         self._remember_directory(path)
+        library_source = None
+        if not str(path).lower().endswith(".realm"):
+            saved = self.settings.value(library_key(path), "")
+            if saved:
+                try:
+                    library_source = json.loads(saved)
+                except (ValueError, TypeError):
+                    library_source = {}  # Report the invalid setting without blocking the database.
+        cache_directory = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.CacheLocation
+        )
 
         def loaded(document):
             self.workspace = Workspace(document, str(Path(path).resolve()))
+            self._remember_library()
+            self.library_mode = False
+            self.map_search.clear()
+            self.status_filter.setCurrentIndex(0)
             self.selected = None
             self.last_import_ids.clear()
             self.collection_search.clear()
@@ -596,11 +794,19 @@ class StudioWindow(QMainWindow):
                     if document.get("LibraryError")
                     else ""
                 )
+                + (" " + document["LibraryNotice"] if document.get("LibraryNotice") else "")
             )
 
         self._task(
             "Reading collections and library metadata…",
-            lambda _stop, _progress: load_document(path, self.backend),
+            lambda stop, progress: load_document(
+                path,
+                self.backend,
+                library_source=library_source,
+                cache_directory=cache_directory,
+                stop=stop,
+                progress=progress,
+            ),
             loaded,
         )
 
@@ -656,10 +862,85 @@ class StudioWindow(QMainWindow):
                 self._edit(lambda: self.workspace.delete(self.selected))
 
     def remove_maps(self):
-        if self.selected and not self.job:
+        if self.selected and not self.job and not self.library_mode:
             hashes = self.selected_hashes()
             if hashes:
                 self._edit(lambda: self.workspace.remove_maps(self.selected, hashes))
+
+    def toggle_library(self):
+        if (
+            not self.workspace
+            or not self.selected
+            or self.job
+            or self.download_dialog
+            or self.migration_dialog
+        ):
+            return
+        self.library_mode = not self.library_mode
+        self.map_search.clear()
+        self.status_filter.setCurrentText("Available" if self.library_mode else "All maps")
+        self.show_collection()
+        self._controls()
+
+    def add_library_maps(self):
+        if not self.workspace or not self.selected or self.job or not self.library_mode:
+            return
+        hashes = self.selected_hashes()
+        if not hashes:
+            return
+        result = []
+
+        def add():
+            result.append(self.workspace.add_library_maps(self.selected, hashes))
+
+        self._edit(add)
+        if result:
+            report = result[0]
+            self.status.setText(
+                f"Added {report['added']:,} beatmaps · "
+                f"{report['already_present']:,} already in this collection. "
+                "Changes are staged until Save."
+            )
+
+    def transfer_maps(self, *, move=False):
+        if (
+            not self.workspace
+            or not self.selected
+            or self.job
+            or self.library_mode
+            or self.download_dialog
+            or self.migration_dialog
+        ):
+            return
+        hashes = tuple(self.selected_hashes())
+        if not hashes or len(self.workspace.collections) < 2:
+            return
+        from tools.qt_transfer_dialog import TransferDialog
+
+        workspace, source_id = self.workspace, self.selected
+        dialog = TransferDialog(self, source_id, hashes, move=move)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        target_id = dialog.target.currentData()
+        dialog.deleteLater()
+        if not accepted or self.workspace is not workspace:
+            return
+        report = []
+
+        def transfer():
+            report.append(workspace.transfer_maps(source_id, target_id, hashes, move=move))
+
+        self._edit(transfer)
+        if report:
+            result = report[0]
+            self.status.setText(
+                (
+                    f"Moved {result['removed']:,} selected beatmaps"
+                    if move
+                    else f"Copied {result['added']:,} new beatmaps"
+                )
+                + f" · {result['already_present']:,} already in the destination. "
+                "Changes are staged until Save."
+            )
 
     def undo(self):
         if self.workspace and not self.job:
@@ -699,7 +980,7 @@ class StudioWindow(QMainWindow):
     def _imported(self, document):
         created, added = self.workspace.merge(document["Collections"])
         for checksum, details in document.get("Beatmaps", {}).items():
-            self.workspace.beatmaps.setdefault(checksum, details)
+            self.workspace.beatmaps.setdefault(checksum.lower(), details)
         names = {group["Name"] for group in document["Collections"]}
         self.last_import_ids = {
             group["Id"] for group in self.workspace.collections if group["Name"] in names
@@ -722,9 +1003,20 @@ class StudioWindow(QMainWindow):
         if path:
             from tools.osu_database import read_osu_database
 
+            cache_directory = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.CacheLocation
+            )
+
+            def read(_stop, _progress):
+                document = read_osu_database(path)
+                document["LibrarySource"] = cache_database_inventory(
+                    path, document, cache_directory
+                )
+                return document
+
             self._task(
                 "Reading installed beatmap hashes…",
-                lambda _stop, _progress: read_osu_database(path),
+                read,
                 self._library_loaded,
             )
 
@@ -733,9 +1025,17 @@ class StudioWindow(QMainWindow):
             self, "Read Replay Parser cache", self._directory(), "Beatmap index (*.json)"
         )
         if path:
+            source = {
+                "kind": "scan",
+                "source": str(Path(path).resolve()),
+                "cache": str(Path(path).resolve()),
+            }
             self._task(
                 "Checking cached beatmap paths…",
-                lambda _stop, _progress: read_replay_cache(path),
+                lambda stop, progress: {
+                    **read_replay_cache(path, stop=stop, progress=progress),
+                    "LibrarySource": source,
+                },
                 self._library_loaded,
             )
 
@@ -754,15 +1054,23 @@ class StudioWindow(QMainWindow):
             )
 
     def _library_loaded(self, document):
-        self.workspace.beatmaps.update(document["Beatmaps"])
-        self.workspace.present_hashes = self.workspace.database_hashes | set(document["Beatmaps"])
+        self.workspace.load_inventory(document)
+        self.workspace.library_source = document.get("LibrarySource")
+        self._remember_library()
         self.show_collection()
         self.status.setText(
             f"Loaded {document['Scanned']:,} beatmaps; "
             f"{document['ErrorCount']} stale/unreadable entries. Collection memberships unchanged."
+            + (
+                " Saved library will be restored when reopening this database."
+                if self.workspace.library_source and self.workspace.source_path
+                else " The library association will be remembered when you save this new file."
+                if self.workspace.library_source
+                else ""
+            )
         )
 
-    def save(self):
+    def save(self, *, after=None):
         if (
             self.job
             or self.download_dialog
@@ -788,6 +1096,7 @@ class StudioWindow(QMainWindow):
 
         def saved(report):
             workspace.mark_saved(report["OutputFile"], report["OutputSha256"])
+            self._remember_library()
             self._remember_directory(report["OutputFile"])
             self.refresh_collections()
             self.status.setText(
@@ -805,6 +1114,8 @@ class StudioWindow(QMainWindow):
                 + "\nVerification report: "
                 + report["ReportPath"]
             )
+            if after:
+                QTimer.singleShot(0, after)
 
         self._task(
             "Verifying changes, creating a backup and saving…",
@@ -847,6 +1158,7 @@ class StudioWindow(QMainWindow):
             path = report["OutputFile"] if stable else report["OutputRealm"]
             checksum = report["OutputSha256"] if stable else report["OutputRealmSha256"]
             workspace.mark_saved(path, checksum)
+            self._remember_library()
             self.refresh_collections()
             self.status.setText(
                 "Saved and reopened the new copy successfully. Original source preserved."
@@ -930,6 +1242,20 @@ class StudioWindow(QMainWindow):
     def _remember_directory(self, path):
         self.settings.setValue("directory", str(Path(path).resolve().parent))
 
+    def _remember_library(self):
+        if (
+            not self.workspace
+            or self.workspace.format != "stable"
+            or not self.workspace.source_path
+        ):
+            return
+        key = library_key(self.workspace.source_path)
+        if self.workspace.library_source:
+            self.settings.setValue(key, json.dumps(self.workspace.library_source))
+        else:
+            self.settings.remove(key)
+        self.settings.sync()
+
     def show_credits(self):
         try:
             if self.credits_dialog is None:
@@ -940,11 +1266,47 @@ class StudioWindow(QMainWindow):
         except RuntimeError as error:
             self.error(str(error))
 
+    def check_updates(self):
+        if self._closed or self.update_check_job:
+            return
+        version = self.version
+        self.update_check_job = Job(lambda stop, _progress: check_for_update(version, stop=stop))
+        self.update_check_job.signals.finished.connect(self._update_checked)
+        self.pool.start(self.update_check_job)
+
+    @Slot(object)
+    def _update_checked(self, outcome):
+        token, info, error = outcome
+        if self._closed or not self.update_check_job or self.update_check_job.token != token:
+            return
+        self.update_check_job = None
+        if not error:
+            self.available_update = info
+            if info:
+                self.update_notice.setText(f"Update to {info.version}")
+            self.update_notice.setVisible(info is not None)
+            self._controls()
+
+    def show_updates(self):
+        if self.job or self.download_dialog or self.migration_dialog:
+            return
+        if self.update_dialog:
+            self.update_dialog.raise_()
+            self.update_dialog.activateWindow()
+            return
+        from tools.qt_update_dialog import UpdateDialog
+
+        self._open_dialog("update_dialog", UpdateDialog(self, self.available_update))
+
+    def restart_after_update(self):
+        self._restarting_for_update = True
+        self.close()
+
     def about(self):
         QMessageBox.information(
             self,
             APP_TITLE,
-            "osu! collection manager.\n\n"
+            f"Version {self.version}\nosu! collection manager.\n\n"
             "Open, edit, undo, import, inspect inventory and save changes with automatic backups. "
             "Tools → Save a copy keeps separate exports available. "
             "Tools includes verified downloads with saved-queue resume "
@@ -955,7 +1317,7 @@ class StudioWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
-        for dialog in (self.download_dialog, self.migration_dialog):
+        for dialog in (self.download_dialog, self.migration_dialog, self.update_dialog):
             if dialog is not None and not dialog._closed:
                 dialog.close()
                 event.ignore()
@@ -972,8 +1334,11 @@ class StudioWindow(QMainWindow):
             self.job.stop.set()
         if self.row_job:
             self.row_job.stop.set()
+        if self.update_check_job:
+            self.update_check_job.stop.set()
         self.filter_timer.stop()
         self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.sync()
         event.accept()
 
     def download_maps(self):
@@ -1027,7 +1392,20 @@ def main():
     parser.add_argument("--file", help="Open a stable collection.db or copied client.realm")
     parser.add_argument("--self-test", action="store_true", help="Run disposable packaged checks")
     parser.add_argument("--report", type=Path, help="Write packaged self-test results here")
+    parser.add_argument("--apply-update", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--finish-update", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.apply_update:
+        if not getattr(sys, "frozen", False):
+            parser.error("The one-shot update helper requires a portable build.")
+        from tools.update_install import apply_update
+
+        try:
+            apply_update(args.apply_update)
+        except Exception as error:
+            print(f"Update helper stopped: {error}", file=sys.stderr)
+            return 1
+        return 0
     app = QApplication(sys.argv[:1])
     app.setOrganizationName("CollectionsStudio")
     app.setApplicationName("CollectionsStudioQt")
@@ -1049,6 +1427,34 @@ def main():
     logging.getLogger("collections-studio").info("Collections Studio started on %s", sys.platform)
     window = StudioWindow()
     window.show()
+    if args.finish_update:
+        from tools.update_install import cleanup_update, confirm_startup
+
+        try:
+            result = confirm_startup(args.finish_update, sys.executable, window.version)
+        except Exception:
+            window.close()
+            finish_shutdown(window)
+            return 1
+        window.status.setText(
+            result.get(
+                "message", f"Updated to {window.version}. Your settings and libraries are ready."
+            )
+        )
+
+        def clean(remaining=10):
+            try:
+                done = cleanup_update(args.finish_update)
+            except (OSError, ValueError):
+                return
+            if not done and remaining:
+                QTimer.singleShot(1000, lambda: clean(remaining - 1))
+
+        QTimer.singleShot(2000, clean)
+    elif getattr(sys, "frozen", False) and window.settings.value(
+        "updates/check-on-startup", True, type=bool
+    ):
+        QTimer.singleShot(1500, window.check_updates)
     if args.file:
         QTimer.singleShot(0, lambda: window.load_path(args.file))
     result = app.exec()

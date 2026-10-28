@@ -58,6 +58,38 @@ The backend pins Realm SDK **20.1.0**, matching the installed osu!lazer AppImage
 with other Realm formats/builds is not established; unsupported collection schemas
 are rejected without migration.
 
+## Application updates
+
+Portable Windows/Linux x64 builds check the latest stable GitHub release in the
+background on startup. An update button appears when a newer version is available.
+**Tools → Check for updates…** opens the same dialog at any time, with release notes
+and an option to turn off startup checks. Preview/beta releases are not installed
+automatically, and a newer installed version is never downgraded.
+
+Choose **Download and restart**. Unsaved collections offer Save / Discard / Cancel;
+a cancelled or failed save stops the update. The client stays open while the
+download is checked against that release's SHA256SUMS and, when supplied, GitHub's
+asset digest. Cancellation removes the partial download. After verification, a
+temporary copy of the executable waits for the old client to exit, replaces it,
+and reopens the current database. Settings and saved song-library associations
+remain in their existing locations. No updater service, separate server, external
+Python installation or installer is involved.
+
+Concurrent updates to the same executable are coordinated by Studio's OS-backed
+file lease. Other client instances are never forcibly closed.
+
+The previous executable is retained until the new GUI confirms startup, then the
+temporary helper/download/backup are removed. A launch failure or early exit
+restores the previous executable and reopens it. A client that is still starting
+after the confirmation timeout is left running with its backup retained. The app
+folder must be writable; use a folder you own. Source checkouts and one-folder
+debug bundles keep their normal manual update process.
+
+Install the first updater-enabled release manually once: older releases do not
+contain this updater. Update checks are anonymous HTTPS requests to the project's
+GitHub repository. Checksums verify download integrity; releases retain the same
+publisher/repository trust as manual downloads.
+
 ## Manage collections
 
 1. Close lazer before making a fresh copy of `client.realm`.
@@ -101,6 +133,36 @@ Map labels come from the supplied Realm, stable inventory, and imported metadata
 hashes show an explicit fallback and their MD5 when selected. A `collection.db`
 contains names and difficulty hashes, so importing it does not install missing
 beatmaps, audio, or backgrounds. Use the separate download queue for those files.
+
+### Copy, move and browse songs in Qt
+
+Select one or more maps, then choose **Copy to…** or **Move to…**. Pick a destination
+collection and review the counts of new additions and maps already there. Copy
+keeps the source memberships; Move ensures the destination contains each selected
+MD5 and then removes it only from the source collection. Cancel leaves the session
+unchanged. One Undo reverses the whole operation, and Save applies it to the file.
+Create another collection with **+ New** first if no destination exists.
+
+For an empty or existing collection, choose **Browse songs**. The target name stays
+in the heading. Realm supplies all its indexed beatmaps, including those outside
+any collection. For stable files, load `osu!.db` or scan Songs with the buttons
+shown in the empty library, or use the Tools menu. A neighboring `osu!.db` is read
+automatically when opening `collection.db`. Scans and filtering run in the background.
+
+The browser initially shows **Available** maps and hides hashes already in the
+target collection. Search, select with Ctrl/Shift or **Select all**, and choose
+**Add selected to collection**. Turn off **Not already in this collection** to see
+the membership column; change the availability filter to inspect other indexed
+Realm entries. **Back to collection** returns to its memberships. Remote import
+labels and downloaded archives alone do not populate the installed song library.
+
+Copy, Move and Add identify duplicates by MD5 without regard to letter case.
+Repeated selections or additions introduce no duplicates. A move to a destination
+that already contains a map still removes the selected source membership. Existing
+legacy duplicates elsewhere are preserved, and different revisions with different
+MD5s remain distinct. Song files, metadata and other collection memberships stay
+in place. Collection names that already repeat in an opened file are distinguished
+by collection number in the destination picker.
 
 ## Migrate between stable and lazer
 
@@ -165,6 +227,35 @@ the `.osu` filename; `osu!.db` supplies fuller metadata more quickly.
 Lazer inventory continues to come from its Realm. Soft-deleted sets and detached
 metadata do not count as installed maps. Downloaded files are marked separately
 and do not become installed merely because remote metadata is available.
+
+### Reuse the library after reopening
+
+Qt remembers the selected Songs scan or osu!.db inventory for each `collection.db`.
+Opening that collection file again, including after restarting Studio, restores
+the saved JSON library in the background. Saving a new collection.db or using
+Save a copy carries its library association to the new path. The association is
+stored in local app settings, leaving the collection.db format unchanged.
+
+Songs scans reuse the existing JSON file. Reopening checks cached file sizes and
+timestamps, preserves map labels and skips changed/missing files without walking
+the whole Songs directory or rehashing maps. Scan Songs again to find newly added
+or changed beatmaps. Identical scan entries leave the JSON's bytes and timestamp
+unchanged, including when the existing cache is newer.
+
+Reading osu!.db explicitly, or loading one next to collection.db automatically,
+saves its parsed beatmap metadata in `osu-inventory-<source-hash>.json` in the app
+cache directory. Repeated identical reads reuse that file without rewriting it.
+Future opens read the JSON rather than reparsing osu!.db; the snapshot remains
+usable if the original osu!.db is unavailable. If that database's size/timestamp
+changes, Studio shows a refresh notice. Read osu!.db again to update the snapshot.
+Player/account data is not included in the cached inventory.
+
+Missing or damaged caches do not prevent opening collections: Studio reports the
+problem and uses a neighbouring osu!.db when available. Cached data never changes
+collection memberships or makes the editing session dirty. Previously created
+scans need one selection through Scan Songs to associate them with a database;
+unchanged entries are reused immediately. Realm files continue to use their own
+embedded beatmap library.
 
 ## Import from Maps or osu!collector
 

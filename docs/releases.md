@@ -22,8 +22,8 @@ Each runner uses its own installation/work directory and service. Windows needs
 a machine-wide Git for Windows installation, including Git Bash, accessible to
 the runner service account. The workflow locates Git Bash without changing the
 VM's global PATH. On Ubuntu, install Qt/X11/OpenGL runtime libraries, Tcl/Tk,
-`xvfb` and `xauth` once as an administrator; jobs check these tools and do not run
-sudo or apt. Python and the pinned .NET SDK are installed in writable locations
+`xvfb`, `xauth` and `binutils` (provides `strip`) once as an administrator. Jobs
+check these tools and do not run sudo or apt. Python and the pinned .NET SDK are installed in writable locations
 by the workflow; no administrator service account is required for building.
 The output path includes the run ID/attempt so an interrupted old build cannot
 collide with a later build.
@@ -54,6 +54,30 @@ Both platforms run the desktop suite and the resulting executable's disposable
 documents, with Python/.NET tools removed from PATH. Passing CI is separate from
 manual Windows DPI, live-data-copy and clean-machine acceptance. Binaries are unsigned.
 
+## Updater versioning and native rehearsal
+
+The executable embeds its application version from pyproject.toml (or the matching
+release tag), independently of Python/.NET versions. Bump the project version and
+uv.lock together before tagging. CI refuses a tag that differs from the project
+version, preventing a released client from repeatedly offering itself as an update.
+Stable updater tags use `vMAJOR.MINOR.PATCH`; prerelease tags keep the existing
+hyphen convention and are excluded from automatic stable updates.
+
+The updater uses the existing platform executable and SHA256SUMS assets on that
+GitHub release. Keep both filenames unchanged. No extra update feed or hosting
+service is needed. Both executable builds retain notices inside the app, and the
+release retains the matching separate source/notice assets.
+
+Every one-file build also runs `scripts/check_portable_update.py` on private
+copies: old process exit, executable replacement, restarted GUI acknowledgement
+and helper cleanup must succeed. The test uses an isolated profile, no game
+database and no live HTTP. It verifies the fixture process image before stopping
+that fixture. The stager refuses new versioned builds without the native rehearsal
+and frozen updater checks, and includes the rehearsal receipt in the notices ZIP.
+This is run natively on both configured runners; local Linux testing alone does
+not establish Windows acceptance. Manual unsigned-Windows/Defender/desktop checks
+remain separate.
+
 ## Licence and source assets
 
 Each release also contains platform notice ZIPs, the exact tagged application
@@ -72,12 +96,33 @@ Build on the matching OS with the documented SDK and pinned interpreter:
 ```sh
 uv sync --frozen --extra desktop --extra desktop-build --python 3.12.14
 uv run --frozen --extra desktop --extra desktop-build python desktop/build_desktop.py \
-  --onefile --output artifacts/my-single-file-build
+  --onefile --profile release --output artifacts/my-single-file-build
 ```
 
 The executable is in `artifacts/my-single-file-build/dist/`. Omitting `--onefile`
 retains the portable folder layout, with Qt libraries directly replaceable in
 `_internal/`. The source and one-file recipes use the same Python/Realm engines.
+
+### Release and debug packaging profiles
+
+CI explicitly selects `--profile release`. On Linux this strips native symbol
+tables and omits the optional GTK platform-theme plugin before dependency analysis,
+avoiding its GTK/system-ICU dependency chain. The app uses Fusion styling; X11,
+Wayland, the desktop portal, image formats and Qt's own ICU libraries remain.
+The build audits required platform plugins and runs the complete frozen self-test.
+Python, Qt and .NET remain bundled; no new runtime installation is required.
+
+Use `--profile debug`, or omit `--profile`, for the original packaging: no symbol
+stripping and no plugin exclusions. This packaging profile preserves the existing
+helper's .NET Release compilation and GUI settings. Windows packaging currently
+stays unchanged in either profile; Linux stripping is never applied to Windows.
+`build-info.json` records the profile, optimizations, binary size and Linux release
+plugin list. Licence notices and matching sources remain included in both profiles.
+
+.NET trimming remains disabled. An isolated locked-restore trial with trimming
+enabled required a new `Microsoft.NET.ILLink.Tasks` 8.0.31 dependency and failed
+with NU1004. Updating that lock and establishing Realm/reflection-based JSON
+compatibility require separate work; no dependency locks were relaxed or changed.
 
 To rebuild against modified Qt/PySide/Shiboken, extract the application and matching
 upstream source assets. Build the changed libraries/wheels using the instructions

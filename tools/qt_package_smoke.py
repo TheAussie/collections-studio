@@ -16,13 +16,17 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from tools import beatmap_downloads
 from tools.beatmap_downloads import Downloader, Mirror, read_download_queue
+from tools.collection_application import load_document
 from tools.collection_backend import DLL, ROOT
 from tools.collection_workspace import Workspace
+from tools.library_cache import cache_database_inventory
 from tools.qt_collection_studio import StudioWindow
 from tools.qt_dialog_support import finish_shutdown
 from tools.qt_download_dialog import DownloadDialog
 from tools.qt_migration_dialog import MigrationDialog
+from tools.qt_transfer_dialog import TransferDialog
 from tools.stable_collections import encode, read_stable
+from tools.update_smoke import run_update_smoke
 
 
 def require(condition, message):
@@ -34,6 +38,7 @@ def run_smoke(report_path):
     report_path = Path(report_path).resolve()
     with tempfile.TemporaryDirectory(prefix="Collections Studio 練習 ") as folder:
         folder = Path(folder)
+        run_update_smoke(folder)
         data = b"osu file format v14\n[Metadata]\nBeatmapSetID:7\n"
         checksum = hashlib.md5(data, usedforsecurity=False).hexdigest()
         source = folder / "source collection.db"
@@ -62,6 +67,67 @@ def run_smoke(report_path):
             [{"Name": "練習 🎵", "Hashes": [checksum.upper()]}, {"Name": "空", "Hashes": []}]
         )
         window.refresh_collections()
+        source_id = next(group["Id"] for group in window.workspace.collections if group["Hashes"])
+        empty_id = next(
+            group["Id"] for group in window.workspace.collections if not group["Hashes"]
+        )
+        transfer = TransferDialog(window, source_id, [checksum, checksum.upper()])
+        require(
+            transfer.target.currentData() == empty_id, "Copy dialog selected the wrong destination."
+        )
+        require(
+            "1 new additions" in transfer.summary.text(), "Copy dialog did not deduplicate MD5s."
+        )
+        transfer.deleteLater()
+        copied = window.workspace.transfer_maps(source_id, empty_id, [checksum, checksum.upper()])
+        require(copied["added"] == 1, "Copy did not add exactly one destination membership.")
+        require(
+            window.workspace.transfer_maps(source_id, empty_id, [checksum])["added"] == 0,
+            "Repeated copy added a duplicate.",
+        )
+        window.workspace.undo()
+        window.workspace.transfer_maps(source_id, empty_id, [checksum], move=True)
+        require(
+            not window.workspace.collection(source_id)["Hashes"], "Move left its source membership."
+        )
+        require(
+            window.workspace.collection(empty_id)["Hashes"] == [checksum],
+            "Move lost the destination hash.",
+        )
+        window.workspace.undo()
+        library_hash = "b" * 32
+        window.workspace.load_inventory(
+            {
+                "Beatmaps": {
+                    checksum: {"Title": "Already added", "Available": True},
+                    library_hash: {"Title": "Library fixture", "Available": True},
+                }
+            }
+        )
+        window.refresh_collections()
+        window.browse_button.click()
+        deadline = time.monotonic() + 10
+        while (window.row_job or window.filter_timer.isActive()) and time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.01)
+        require(
+            window.map_model.rowCount() == 1, "Library did not filter existing collection hashes."
+        )
+        window.maps.selectAll()
+        window.add_library_button.click()
+        require(
+            library_hash in window.workspace.collection(source_id)["Hashes"], "Library add failed."
+        )
+        window.undo()
+        require(
+            window.workspace.collection(source_id)["Hashes"] == [checksum], "Library undo failed."
+        )
+        window.browse_button.click()
+        # The following download checks deliberately start with no installed
+        # inventory. The library fixture above must not satisfy their missing map.
+        window.workspace.load_inventory({"Beatmaps": {}})
+        window.show_collection()
+        require(source.read_bytes() == original, "Membership edits wrote before Save.")
         window.save_button.click()
         deadline = time.monotonic() + 30
         while window.job and time.monotonic() < deadline:
@@ -84,6 +150,25 @@ def run_smoke(report_path):
             "The backup does not exactly match the original stable file.",
         )
         QApplication.processEvents()
+
+        inventory_file = folder / "synthetic inventory source.db"
+        inventory_file.write_bytes(b"Synthetic source identity; parsed metadata supplied below.")
+        inventory_maps = {checksum: {"Title": "Saved inventory fixture", "Available": True}}
+        binding = cache_database_inventory(
+            inventory_file, {"Beatmaps": inventory_maps}, folder / "inventory cache"
+        )
+        cache_file = Path(binding["cache"])
+        cache_stamp, cache_bytes = cache_file.stat().st_mtime_ns, cache_file.read_bytes()
+        cache_database_inventory(
+            inventory_file, {"Beatmaps": inventory_maps}, folder / "inventory cache"
+        )
+        require(
+            (cache_file.stat().st_mtime_ns, cache_file.read_bytes()) == (cache_stamp, cache_bytes),
+            "Unchanged inventory JSON was rewritten.",
+        )
+        inventory_file.unlink()
+        restored = load_document(source, window.backend, library_source=binding)
+        require(restored["Beatmaps"] == inventory_maps, "Saved library JSON did not restore.")
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -226,10 +311,14 @@ def run_smoke(report_path):
             "Python": platform.python_version(),
             "Qt": qVersion(),
             "Frozen": bool(getattr(sys, "frozen", False)),
+            "VersionedUpdateDownloadAndReplacement": True,
             "StableUiOpen": True,
             "CreditsAndLicenceDocuments": True,
             "UnicodePathsAndNames": True,
             "ImportDedupAndEmptyCollection": True,
+            "CopyMoveDuplicateHandlingAndUndo": True,
+            "GameLibraryBrowseAddAndUndo": True,
+            "SavedInventoryJsonReuseAndRestore": True,
             "VerifiedSaveAndSourceBackup": True,
             "SaveUpdatesOpenedFileWithExactBackup": True,
             "SaveOutputMatchesOpenedFileIdentity": True,

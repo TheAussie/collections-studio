@@ -150,3 +150,135 @@ clean-machine and game-database locking acceptance remain pending.
 
 The owner-requested first release tag is v0.1.0. Its tag-triggered workflow repeats
 native verification and publishes only after both platform jobs succeed.
+
+## Collection copy/move and game library browser — 28 October 2026
+
+Qt now exposes Copy to / Move to for selected memberships and Browse songs for
+adding from the loaded game inventory. Workspace operations validate selections
+before editing, deduplicate MD5s case-insensitively and use one Undo snapshot.
+Existing legacy duplicate entries are preserved rather than silently cleaned up.
+Library membership is separate from remote import metadata and downloaded archives.
+No dependencies, native helper source or on-disk collection formats changed.
+
+Local Linux verification with Python 3.12.14 / Qt 6.12.0:
+
+- 225 tests passed; 16 classic Tk tests skipped because no display was available.
+  New coverage includes duplicate/no-op transfers, moves into an existing target,
+  stale selections, atomic failures, Undo, stable save/backups, Realm library
+  membership, Songs scanning and a responsive 40,000-entry browser.
+- The seven new Qt membership tests also passed with a 2× scale factor offscreen.
+- The source-based offline UI smoke passed, including the new controls, existing
+  download/resume/save/migration checks and all 59 native Realm assertions using
+  the existing locally built helper. This was not a new frozen executable build.
+- Ruff lint and formatting passed. Synthetic web collection-link / collection.db
+  contracts remained compatible across the separate projects.
+- Synthetic collection, library and destination-dialog screens were inspected at
+  1360×900 and 960×640. The library keeps readable titles and horizontal scrolling
+  when its extra columns exceed the viewport.
+
+Tests used temporary synthetic files and isolated settings. No game database,
+credential, production service, remote release or dependency installation was
+used. These checks do not establish Windows UI or new packaged-binary acceptance.
+
+## Smaller Linux release packaging — 28 October 2026
+
+Release CI now selects `--profile release`. Linux strips native symbols and uses
+a PyInstaller QtGui hook that excludes only the optional GTK theme plugin before
+transitive dependency collection. The payload audit requires X11, Wayland and
+offscreen platform plugins. The portal, image formats, Qt ICU, all application
+features and all notice/source assets remain. Default / `--profile debug` retains
+the previous packaging; Windows is unchanged in either profile. No dependency
+versions or lock files changed.
+
+Local verification used the existing pinned Python/.NET packages and cached,
+hash-verified Qt source archives and notice texts. Both same-source one-file
+builds passed the frozen self-test with Python/dotnet absent from PATH, including
+all 59 native Realm assertions, save/backups, transfers/library browsing,
+downloads/resume, migration and the licence viewer:
+
+- Debug reference: 124,243,824 bytes (118.49 MiB), GTK theme still included.
+- Optimized release: 96,991,320 bytes (92.50 MiB), GTK theme absent.
+- Reduction: 27,252,504 bytes / 25.99 MiB / 21.9% on this Arch Linux build.
+- 240 Python tests passed; 16 classic Tk tests skipped without a display. Build
+  coverage checks default/debug/release and simulated Windows/Linux spec settings,
+  GTK filtering, platform-plugin audit failures and notice/source preservation.
+- Ruff lint/format, workflow YAML and Bash syntax checks passed.
+
+An isolated `PublishTrimmed=true` locked restore stopped with NU1004 because it
+adds Microsoft.NET.ILLink.Tasks 8.0.31, absent from the reviewed dependency lock.
+Trimming remains disabled pending a deliberate dependency/Realm/JSON compatibility
+change. The lock was not bypassed. All operations used synthetic temporary files;
+no running user session or personal database was accessed. Native Ubuntu/Windows
+runner validation and manual desktop acceptance remain separate; no run, tag or
+release was published by this local work.
+
+## Saved Songs and osu!.db inventories — 28 October 2026
+
+Qt now remembers an inventory-cache association per canonical collection.db path.
+Successful Songs scans reuse their existing JSON; explicit and neighbouring
+osu!.db reads cache parsed beatmap metadata as JSON. Reopening a collection file,
+including in a new application session, restores that library in a worker without
+rehashing Songs or reparsing osu!.db. New-file Save and Save a copy preserve the
+association; other databases do not inherit it accidentally. Realm inventory
+continues to come from its own schema/data.
+
+Identical inventory contents do not rewrite JSON or change its timestamp. Songs
+cache comparison ignores directory enumeration order. Restored scans validate
+file size/mtime, skip stale entries and retain labels. osu!.db snapshots remain
+usable when the original database is unavailable and show a refresh notice if
+its signature changes. Missing/corrupt caches preserve collection-file opening,
+with a notice and neighbouring database fallback. Cache settings stay outside
+game databases, and account/player data is not saved.
+
+Local verification: 253 Python tests passed; 16 classic Tk tests skipped without
+a display. New checks cover fresh-window restore, scan/explicit/automatic database
+sources, unchanged newer caches, missing/changed files, corruption, cancellation,
+empty inventories and Save/Save a copy. Ruff lint/format and the synthetic
+web-to-desktop contract passed. The new optimized Linux executable passed its
+frozen self-test with a clean profile and no Python/dotnet on PATH, including JSON
+reuse/restore, existing UI operations and all 59 native Realm assertions. Only
+temporary synthetic files/settings and existing cached build dependencies were
+used. No user application session, personal database or production service was
+touched. Native Windows validation and release publication remain pending.
+
+## Built-in portable updates — 28 October 2026
+
+Portable Qt clients check stable GitHub releases in the background and expose one
+Download and restart action. The existing release executables and SHA256SUMS form
+the update feed; no server/service or new dependency is added. Downloads enforce
+repository/tag/platform URLs, HTTPS redirect hosts, byte limits and SHA-256 checks.
+Unsaved changes offer Save / Discard / Cancel, with failed/cancelled saves stopping
+the update. The old client stays open until the helper confirms readiness.
+
+The same executable supplies a temporary helper mode, waits for parent exit,
+holds Studio's OS-backed executable lease and atomically renames the old/new files.
+The new GUI validates its version and executable hash before acknowledging startup.
+Settings, inventory associations and the current database path are retained.
+Successful handoffs remove helper/staging/backup files; failed launch or early exit
+restores the previous executable. Slow but running new clients retain recovery
+copies rather than being forcibly stopped. Source Python and one-folder bundles
+are excluded from automatic replacement. Runtime staging/lease files are ignored
+by Git.
+
+Validation on Linux: 307 tests passed; 16 classic Tk tests skipped without a
+display. Tests cover versions/platform selection, unsupported/missing/foreign
+assets, checksum/size failures, cancellation, unsaved edits, failed saves, helper
+readiness, concurrent updates, replacement/sharing failures, startup mismatch,
+rollback, late startup confirmation and cleanup. Ruff lint/format, workflow YAML
+and Bash syntax, the web/desktop contract and compact dialog visual review passed.
+
+The optimized one-file Linux executable (about 92.55 MiB) passed the frozen
+offline updater checks and all 59 Realm assertions. A real packaged rehearsal on
+private copies then proved parent exit, physical executable replacement, new GUI
+startup acknowledgement and helper cleanup, with an isolated config/cache/data
+profile and no live HTTP/game data. Its report is bound to the tested executable
+SHA-256 and version; new versioned releases cannot stage without this receipt.
+The actual release stager also passed, preserving credits, notices and all matching
+Qt/PySide/Shiboken sources. Only the rehearsal's image-verified private GUI process
+was stopped; no existing user app or personal database was accessed.
+
+Both native CI builds now require this rehearsal. Windows updater acceptance is
+pending the next Windows VM build; local Linux checks do not establish it. The
+project version remains 0.1.0: choose/update the next project+lock version before
+tagging. CI rejects mismatched tags to prevent repeated self-update offers. No
+commit, push, workflow dispatch, tag or publication was performed by this work.

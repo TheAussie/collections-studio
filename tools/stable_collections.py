@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from tools.beatmap_downloads import MAX_OSU, _check_cancel, _private_json, valid_hash
+from tools.library_cache import read_cache_json, write_cache_json
 
 MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_VERSION = 20261026
@@ -258,7 +259,7 @@ def scan_songs(folder, *, stop=None, progress=None, cache_directory=None):
                 errors.append(str(path) + ": " + str(error))
     if stop is not None:
         _check_cancel(stop)
-    _private_json(cache_path, {"entries": entries})
+    write_cache_json(cache_path, {"entries": entries}, entries=True)
     return {
         "Beatmaps": maps,
         "Scanned": scanned,
@@ -267,6 +268,7 @@ def scan_songs(folder, *, stop=None, progress=None, cache_directory=None):
         "Reused": reused,
         "Hashed": scanned - reused,
         "Stale": len(cached),
+        "LibrarySource": {"kind": "scan", "source": str(folder), "cache": str(cache_path)},
     }
 
 
@@ -286,13 +288,20 @@ def _cache_entries(path):
         return {}
 
 
-def read_replay_cache(path):
+def read_replay_cache(path, *, stop=None, progress=None, allow_empty=False):
     """Replay Parser's path + file_size + modified_timestamp(ns) cache contract."""
     entries = _cache_entries(path)
     if not entries:
-        raise ValueError("No readable beatmap-index-cache.json entries were found.")
+        saved = read_cache_json(path) if allow_empty else None
+        if not isinstance(saved, dict) or saved.get("entries") != []:
+            raise ValueError("No readable beatmap-index-cache.json entries were found.")
     maps, stale = {}, 0
-    for filename, entry in entries.items():
+    for number, (filename, entry) in enumerate(entries.items()):
+        if number % 256 == 0:
+            if stop is not None:
+                _check_cancel(stop)
+            if progress is not None:
+                progress(f"Checking saved song library: {number:,} files")
         file = Path(filename)
         try:
             info = file.stat()
@@ -306,5 +315,11 @@ def read_replay_cache(path):
         except OSError:
             stale += 1
             continue
-        maps[entry["md5"].lower()] = {"Title": file.stem, "Available": True}
+        metadata = entry.get("metadata")
+        maps[entry["md5"].lower()] = {
+            **(metadata if isinstance(metadata, dict) else {"Title": file.stem}),
+            "Available": True,
+        }
+    if stop is not None:
+        _check_cancel(stop)
     return {"Beatmaps": maps, "Scanned": len(maps), "ErrorCount": stale}

@@ -15,6 +15,12 @@ Python and .NET are bundled. Linux requires glibc 2.35+ and desktop system libra
 see [platform requirements and release assets](docs/releases.md). Releases also
 include matching sources, third-party notices and checksums.
 
+Portable builds check for newer stable GitHub releases in the background. Use
+**Tools → Check for updates… → Download and restart** to verify the download,
+close the client, replace its executable and reopen the current database.
+Unsaved edits offer Save / Discard / Cancel. The updater runs from the app itself;
+no service, installer or separately installed runtime is required.
+
 ## Run from source
 
 Use Python 3.12+ and uv. The Qt interface:
@@ -34,6 +40,12 @@ backup before updating an opened file; Save a copy and migration create new file
 See the [feature guide](docs/collection-studio.md),
 [collection-link protocol](docs/collection-api.md), and
 [portable build instructions](desktop/README.md).
+
+In Qt, select beatmaps and use **Copy to…** or **Move to…** to choose another
+collection. **Browse songs** lets you fill a collection from the game's inventory:
+Realm supplies it directly; stable files use **Read osu!.db…** or
+**Scan Songs folder…**. Existing destination MD5s are skipped case-insensitively.
+Changes support Undo and stay in memory until Save.
 
 ## Checks and builds
 

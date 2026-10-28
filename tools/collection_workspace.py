@@ -3,6 +3,8 @@
 from copy import deepcopy
 from uuid import uuid4
 
+from tools.beatmap_downloads import valid_hash
+
 
 class Workspace:
     def __init__(self, document, source_path):
@@ -11,14 +13,19 @@ class Workspace:
         self.format = document.get("Format", "realm")
         self.legacy_version = document.get("Version", 20261026)
         self.collections = deepcopy(document["Collections"])
-        self.beatmaps = dict(document.get("Beatmaps", {}))
+        self.beatmaps = self._inventory_metadata(document.get("Beatmaps", {}))
         self.present_hashes = {
             checksum.lower()
             for checksum, details in self.beatmaps.items()
             if details.get("Available", True)
         }
         self.database_hashes = self.present_hashes.copy() if self.format == "realm" else set()
+        # Remote imports may add metadata later; they must not become game inventory.
+        self.library_hashes = (
+            set(self.beatmaps) if self.format == "realm" else self.present_hashes.copy()
+        )
         self.downloaded = {}
+        self.library_source = document.get("LibrarySource")
         self._baseline = deepcopy(self.collections)
         self._undo = []
 
@@ -83,6 +90,88 @@ class Workspace:
         if remaining != item["Hashes"]:
             self._remember()
             item["Hashes"] = remaining
+
+    @staticmethod
+    def _inventory_metadata(maps):
+        result = {}
+        for value, details in maps.items():
+            if valid_hash(value):
+                key = value.lower()
+                if key not in result or details.get("Available", True):
+                    result[key] = dict(details)
+        return result
+
+    @staticmethod
+    def _selected_hashes(hashes):
+        values = list(hashes)
+        if not values or any(not valid_hash(value) for value in values):
+            raise ValueError("Select one or more valid beatmap MD5s.")
+        return list(dict.fromkeys(value.lower() for value in values))
+
+    def _require_collection(self, collection_id):
+        try:
+            return self.collection(collection_id)
+        except StopIteration:
+            raise ValueError(
+                "The collection changed. Choose it again before adding maps."
+            ) from None
+
+    def _addition(self, target, selected):
+        known = {value.lower() for value in target["Hashes"]}
+        additions = [value for value in selected if value not in known]
+        return additions, {
+            "selected": len(selected),
+            "added": len(additions),
+            "already_present": len(selected) - len(additions),
+            "removed": 0,
+        }
+
+    def transfer_maps(self, source_id, target_id, hashes, *, move=False):
+        """One atomic, undoable union; moves remove only selected source memberships."""
+        selected = self._selected_hashes(hashes)
+        selected_set = set(selected)
+        source, target = self._require_collection(source_id), self._require_collection(target_id)
+        known_source = {value.lower() for value in source["Hashes"]}
+        if not selected_set <= known_source:
+            raise ValueError(
+                "Some selected maps are no longer in the source collection. Select them again."
+            )
+        additions, report = self._addition(target, selected)
+        if source is target:
+            return {**report, "added": 0, "already_present": len(selected)}
+        if additions or move:
+            remaining = (
+                [value for value in source["Hashes"] if value.lower() not in selected_set]
+                if move
+                else None
+            )
+            self._remember()
+            target["Hashes"] = [*target["Hashes"], *additions]
+            if move:
+                source["Hashes"] = remaining
+                report["removed"] = len(selected)
+        return report
+
+    def add_library_maps(self, target_id, hashes):
+        selected = self._selected_hashes(hashes)
+        target = self._require_collection(target_id)
+        if not set(selected) <= self.library_hashes:
+            raise ValueError(
+                "Some selected maps are no longer in the loaded game library. Browse it again."
+            )
+        additions, report = self._addition(target, selected)
+        if additions:
+            self._remember()
+            target["Hashes"] = [*target["Hashes"], *additions]
+        return report
+
+    def load_inventory(self, document):
+        maps = self._inventory_metadata(document["Beatmaps"])
+        self.beatmaps.update(maps)
+        self.present_hashes = self.database_hashes | {
+            value for value, details in maps.items() if details.get("Available", True)
+        }
+        self.library_hashes = set(self.beatmaps) if self.format == "realm" else set(maps)
 
     def merge(self, incoming):
         proposed = deepcopy(self.collections)

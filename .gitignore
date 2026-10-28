@@ -23,3 +23,5 @@ artifacts/
 build/
 dist/
 *.download
+.collections-studio-update-*/
+*.collections-studio.lock

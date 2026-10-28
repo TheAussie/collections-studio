@@ -82,6 +82,7 @@ jobs:
         run: |
           command -v xvfb-run
           command -v xauth
+          command -v strip
 
       - name: Install locked Python dependencies
         run: uv sync --frozen --extra desktop --extra desktop-build --python 3.12.14
@@ -100,9 +101,11 @@ jobs:
         run: uv run --frozen --extra desktop --extra desktop-build pytest -q -ra --tb=short --basetemp "$RUNNER_TEMP/pt"
 
       - name: Build and self-test standalone executable
+        env:
+          COLLECTIONS_STUDIO_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: >-
           uv run --frozen --extra desktop --extra desktop-build
-          python desktop/build_desktop.py --onefile
+          python desktop/build_desktop.py --onefile --profile release
           --rid "${{ matrix.rid }}" --output "$RUNNER_TEMP/cs-build-${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Stage executable, notices and corresponding sources

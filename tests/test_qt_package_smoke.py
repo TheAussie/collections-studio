@@ -67,4 +67,8 @@ def test_packaged_unicode_save_download_and_migration_under_windows_legacy_encod
     assert results["SaveOutputMatchesOpenedFileIdentity"]
     assert results["ResumeSkipsUnchangedZipVerification"]
     assert results["QtMigrationDetachedFixtureUi"]
+    assert results["CopyMoveDuplicateHandlingAndUndo"]
+    assert results["GameLibraryBrowseAddAndUndo"]
+    assert results["SavedInventoryJsonReuseAndRestore"]
+    assert results["VersionedUpdateDownloadAndReplacement"]
     assert len(native_calls) == 1

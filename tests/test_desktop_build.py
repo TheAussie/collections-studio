@@ -44,14 +44,22 @@ def test_sdk_prerequisite_uses_the_pinned_global_json(monkeypatch):
 
 
 @pytest.mark.parametrize("onefile", [False, True])
+@pytest.mark.parametrize("profile", [None, "debug", "release"])
+@pytest.mark.parametrize("host_platform", ["linux", "win32"])
 def test_spec_marks_native_helper_executable_and_selects_requested_bundle_layout(
-    tmp_path, monkeypatch, onefile
+    tmp_path, monkeypatch, onefile, profile, host_platform
 ):
     import runpy
     import sys
     from pathlib import Path
     from types import SimpleNamespace
 
+    monkeypatch.setattr(sys, "platform", host_platform)
+    if profile is None:
+        monkeypatch.delenv("COLLECTIONS_STUDIO_PROFILE", raising=False)
+    else:
+        monkeypatch.setenv("COLLECTIONS_STUDIO_PROFILE", profile)
+    optimized = profile == "release" and host_platform == "linux"
     stage = tmp_path / "stage"
     helper = (
         stage
@@ -64,6 +72,7 @@ def test_spec_marks_native_helper_executable_and_selects_requested_bundle_layout
 
     def analysis(*args, **kwargs):
         assert kwargs["binaries"] == [(str(helper), "backend")]
+        assert bool(kwargs["hookspath"]) is optimized
         return SimpleNamespace(
             pure=[],
             scripts=[],
@@ -93,4 +102,50 @@ def test_spec_marks_native_helper_executable_and_selects_requested_bundle_layout
     assert len(calls) == 1
     assert bool(collections) is not onefile
     assert calls[0][1].get("exclude_binaries", False) is not onefile
+    assert calls[0][1]["strip"] is optimized
+    if collections:
+        assert collections[0][1]["strip"] is optimized
     assert all(entry[2] != "DATA" or entry[1] != str(helper) for entry in scope["a"].datas)
+
+
+def test_release_gui_hook_keeps_upstream_dependencies_except_optional_gtk(monkeypatch):
+    import runpy
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    binaries = [
+        ("/wheel/plugins/platformthemes/libqgtk3.so", "platformthemes"),
+        ("/wheel/plugins/platformthemes/libqxdgdesktopportal.so", "platformthemes"),
+        ("/wheel/plugins/platforms/libqwayland.so", "platforms"),
+        ("/wheel/plugins/platforms/libqxcb.so", "platforms"),
+        ("/wheel/plugins/imageformats/libqjpeg.so", "imageformats"),
+    ]
+    monkeypatch.setitem(
+        sys.modules,
+        "PyInstaller.utils.hooks.qt",
+        SimpleNamespace(add_qt6_dependencies=lambda _path: (["PySide6.QtCore"], binaries, [])),
+    )
+    hook = Path(build_desktop.__file__).parent / "release-hooks/hook-PySide6.QtGui.py"
+    scope = runpy.run_path(str(hook))
+    assert scope["binaries"] == binaries[1:]
+    assert scope["hiddenimports"] == ["PySide6.QtCore"]
+
+
+@pytest.mark.parametrize("bad_plugin", [None, "libqgtk3.so", "libqxcb.so", "libqwayland.so"])
+def test_release_payload_requires_desktop_platforms_and_excludes_gtk(tmp_path, bad_plugin):
+    plugins = tmp_path / "_internal/PySide6/Qt/plugins"
+    for name in ["libqxcb.so", "libqwayland.so", "libqoffscreen.so"]:
+        if name != bad_plugin:
+            path = plugins / "platforms" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+    if bad_plugin == "libqgtk3.so":
+        path = plugins / "platformthemes" / bad_plugin
+        path.parent.mkdir()
+        path.touch()
+    if bad_plugin is None:
+        assert len(build_desktop.check_linux_release_plugins(tmp_path, None, False)) == 3
+    else:
+        with pytest.raises(RuntimeError, match="X11/Wayland"):
+            build_desktop.check_linux_release_plugins(tmp_path, None, False)

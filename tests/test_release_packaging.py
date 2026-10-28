@@ -96,3 +96,45 @@ def test_refuses_unverified_release_before_creating_assets(verified_build, tmp_p
     with pytest.raises(ValueError):
         package_release.stage_release(build, "linux-x64", output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("failure", [None, "missing", "wrong_binary", "wrong_version", "failed"])
+def test_versioned_release_requires_matching_native_update_rehearsal(
+    verified_build, tmp_path, failure
+):
+    build = verified_build
+    info = json.loads((build / "build-info.json").read_text())
+    info.update(ApplicationVersion="0.1.1", NativeUpdateRehearsal=True)
+    (build / "build-info.json").write_text(json.dumps(info))
+    (build / "packaged-self-test.json").write_text(
+        json.dumps(
+            {
+                "Frozen": True,
+                "CreditsAndLicenceDocuments": True,
+                "VersionedUpdateDownloadAndReplacement": True,
+            }
+        )
+    )
+    rehearsal = build / "update-rehearsal/native-update-rehearsal.json"
+    if failure != "missing":
+        rehearsal.parent.mkdir()
+        rehearsal.write_text(
+            json.dumps(
+                {
+                    "Passed": failure != "failed",
+                    "Version": "9.9.9" if failure == "wrong_version" else "0.1.1",
+                    "BinarySha256": "0" * 64
+                    if failure == "wrong_binary"
+                    else package_release.digest(build / "dist/CollectionsStudio"),
+                }
+            )
+        )
+    output = tmp_path / "release"
+    if failure:
+        with pytest.raises(ValueError, match="native update rehearsal"):
+            package_release.stage_release(build, "linux-x64", output)
+        assert not output.exists()
+    else:
+        package_release.stage_release(build, "linux-x64", output)
+        with zipfile.ZipFile(output / "CollectionsStudio-linux-x64-notices.zip") as archive:
+            assert archive.read("native-update-rehearsal.json") == rehearsal.read_bytes()

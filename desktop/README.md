@@ -34,6 +34,19 @@ stay in their collections. Existing duplicate, Unicode, stable version marker,
 stale-source and Realm unrelated-table audits remain authoritative. Backups and
 separate exports never overwrite an existing file.
 
+In Qt, **Copy to…** / **Move to…** transfer selected difficulty memberships to
+another collection, with a preview of new additions and existing MD5s. **Browse
+songs** switches the current collection to the game library, including maps not
+assigned to any collection. Realm supplies its indexed beatmaps automatically;
+stable users load `osu!.db` or scan Songs using the inline buttons or Tools menu.
+The browser initially shows Available maps not already in the target collection.
+Turn off **Not already in this collection** to see membership indicators.
+Duplicates are skipped by case-insensitive MD5; a move removes selected source
+memberships after ensuring the destination contains them. Other memberships,
+song files and existing legacy duplicates remain intact. Every operation supports
+Undo and changes only the working session until Save. These new controls are in
+Qt; the classic interface remains available with its existing features.
+
 **Tools → Get missing maps…** checks the last import, current collection, all
 collections, or a saved queue. Choose mirrors and an archive folder, then download
 all missing maps or a selection. Cancel keeps verified archives and every pending
@@ -94,7 +107,9 @@ read may need to finish first. Scans check cancellation between files.
 Qt 6 uses device-independent coordinates. The main screen and both dialogs are
 tested at default and compact sizes and with explicit scale factors; Windows mixed-DPI monitor
 movement, Windows file locking, Defender/SmartScreen and an unsigned build remain
-unverified. No code signing, installer or auto-updater is added. Tagged release
+unverified. Portable builds include the one-click updater described in
+[the feature guide](../docs/collection-studio.md#application-updates). No installer
+or code signing is added. Tagged release
 uploads are handled separately by the GitHub workflow described below.
 
 ## Reproducible local one-folder build
@@ -121,6 +136,12 @@ Tk widgets are bundled. The output is one folder with replaceable Qt libraries.
 An existing output folder is rejected; use `--output "new build folder"` for a
 later build. Input versions/dependencies are reproducible; byte-for-byte identical
 binaries are not claimed (toolchain timestamps/platform outputs can vary).
+
+The default `--profile debug` preserves this original packaging. Release CI passes
+`--profile release`: Linux strips native symbols and excludes the unused GTK theme
+plugin before collecting its dependencies, retaining X11/Wayland/portal/image
+support. Windows keeps its existing packaging. Both profiles retain the bundled,
+untrimmed .NET runtime and all notices/sources. See [release profile details](../docs/releases.md#release-and-debug-packaging-profiles).
 
 Output: `artifacts/desktop-build/dist/CollectionsStudio/`. The builder runs its
 frozen executable's disposable `--self-test --report FILE` with Python/.NET tools

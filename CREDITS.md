@@ -204,6 +204,8 @@ native helper's locked dependencies are listed below (across both supported RIDs
 
 ## Release automation
 
+- GitHub Releases and its public REST API — version checks and application updates.
+  https://docs.github.com/en/rest/releases
 - GitHub Actions and the maintained actions/checkout, actions/setup-python,
   actions/setup-dotnet, actions/upload-artifact and actions/download-artifact
   actions — native builds and release artifact transfer. https://github.com/actions

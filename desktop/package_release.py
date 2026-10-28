@@ -29,7 +29,19 @@ def stage_release(build, rid, output, include_qt_sources=False):
         raise ValueError("Release assets require a single-file build for the requested platform.")
     if not report.get("Frozen") or not report.get("CreditsAndLicenceDocuments"):
         raise ValueError("A successful frozen self-test including credits/licences is required.")
-    if digest(binary) != hashes[source_name]:
+    binary_hash = digest(binary)
+    rehearsal = build / "update-rehearsal/native-update-rehearsal.json"
+    native = json.loads(rehearsal.read_text(encoding="utf-8")) if rehearsal.is_file() else {}
+    if info.get("ApplicationVersion") and (
+        not info.get("NativeUpdateRehearsal")
+        or not report.get("VersionedUpdateDownloadAndReplacement")
+        or not rehearsal.is_file()
+        or not native.get("Passed")
+        or native.get("Version") != info["ApplicationVersion"]
+        or native.get("BinarySha256") != binary_hash
+    ):
+        raise ValueError("A successful native update rehearsal is required for versioned releases.")
+    if binary_hash != hashes[source_name]:
         raise ValueError("The binary differs from the verified build manifest.")
     notices = build / "notices"
     dependencies = json.loads((notices / "dependency-manifest.json").read_text(encoding="utf-8"))
@@ -63,6 +75,8 @@ def stage_release(build, rid, output, include_qt_sources=False):
         bundle.write(ROOT / "docs" / "releases.md", "REBUILDING.md")
         for filename in ["packaged-self-test.json", "bundle-sha256.json", "build-info.json"]:
             bundle.write(build / filename, filename)
+        if info.get("ApplicationVersion"):
+            bundle.write(rehearsal, "native-update-rehearsal.json")
     if include_qt_sources:
         for source in verified_sources:
             shutil.copy2(source, output / source.name)
