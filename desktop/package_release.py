@@ -12,6 +12,8 @@ EXECUTABLES = {
     "win-x64": ("CollectionsStudio.exe", "CollectionsStudio-windows-x64.exe"),
     "linux-x64": ("CollectionsStudio", "CollectionsStudio-linux-x64"),
 }
+SUPPORT_ARCHIVE = "CollectionsStudio-sources-and-notices.zip"
+PUBLIC_ASSETS = {name for _, name in EXECUTABLES.values()} | {SUPPORT_ARCHIVE, "SHA256SUMS"}
 
 
 def digest(path):
@@ -94,6 +96,107 @@ def write_checksums(directory):
     )
 
 
+def assemble_release(inputs, output):
+    """Publishable file set; retain every original source/notice archive byte-for-byte."""
+    inputs, output = Path(inputs), Path(output)
+    sources = json.loads((ROOT / "desktop/qt-sources.lock.json").read_text(encoding="utf-8"))
+    source_names = {entry["Archive"] for entry in sources}
+    notice_names = {f"CollectionsStudio-{rid}-notices.zip" for rid in EXECUTABLES}
+    application_source = "CollectionsStudio-source.tar.gz"
+    required = (
+        {name for _, name in EXECUTABLES.values()}
+        | source_names
+        | notice_names
+        | {application_source}
+    )
+    if output.exists():
+        raise ValueError("Choose an unused final release output directory.")
+    if {p.name for p in inputs.iterdir()} != required or any(
+        not (inputs / name).is_file() or (inputs / name).is_symlink() for name in required
+    ):
+        raise ValueError(
+            "Release inputs must contain exactly both binaries, notices and locked sources."
+        )
+    for entry in sources:
+        if digest(inputs / entry["Archive"]) != entry["Sha256"]:
+            raise ValueError(f"Release source differs from its lock: {entry['Archive']}")
+    versions = set()
+    for rid, (original, binary) in EXECUTABLES.items():
+        with zipfile.ZipFile(inputs / f"CollectionsStudio-{rid}-notices.zip") as notices:
+            info = json.loads(notices.read("build-info.json"))
+            report = json.loads(notices.read("packaged-self-test.json"))
+            hashes = json.loads(notices.read("bundle-sha256.json"))
+            dependencies = json.loads(notices.read("notices/dependency-manifest.json"))
+            for name in ("LICENSE", "CREDITS.md", "THIRD_PARTY_NOTICES.md"):
+                if not notices.read("notices/" + name):
+                    raise ValueError(f"Missing platform notice: {name}")
+            if (
+                info.get("RuntimeIdentifier") != rid
+                or info.get("Format") != "onefile"
+                or not report.get("Frozen")
+                or not report.get("CreditsAndLicenceDocuments")
+                or dependencies.get("FirstPartyLicense") != "MIT"
+                or hashes.get(original) != digest(inputs / binary)
+                or not notices.read("REBUILDING.md")
+            ):
+                raise ValueError(f"Release inputs differ from the verified {rid} build.")
+            recorded = {
+                entry["Archive"]: entry["Sha256"]
+                for entry in dependencies["QtCorrespondingSources"]
+            }
+            if any(recorded.get(entry["Archive"]) != entry["Sha256"] for entry in sources):
+                raise ValueError(f"Source notices differ from the locked {rid} dependencies.")
+            version = info.get("ApplicationVersion")
+            versions.add(version)
+            if version:
+                native = json.loads(notices.read("native-update-rehearsal.json"))
+                if (
+                    not info.get("NativeUpdateRehearsal")
+                    or not report.get("VersionedUpdateDownloadAndReplacement")
+                    or not native.get("Passed")
+                    or native.get("Version") != version
+                    or native.get("BinarySha256") != hashes[original]
+                ):
+                    raise ValueError(f"Missing matching native updater rehearsal for {rid}.")
+    if len(versions) != 1:
+        raise ValueError("Both release binaries must have the same application version.")
+    # Only create the public output after every platform/source check has passed.
+    output.mkdir(parents=True)
+    for _, name in EXECUTABLES.values():
+        shutil.copy2(inputs / name, output / name)
+    (output / EXECUTABLES["linux-x64"][1]).chmod(0o755)
+    contents = {application_source: "application/" + application_source}
+    contents.update({name: "libraries/" + name for name in source_names})
+    contents.update({name: "notices/" + name for name in notice_names})
+    with zipfile.ZipFile(output / SUPPORT_ARCHIVE, "x", compression=zipfile.ZIP_STORED) as bundle:
+        bundle.writestr(
+            "README.txt",
+            (
+                "Collections Studio sources and notices\n\n"
+                "Run the separate Windows EXE or Linux executable to use the app.\n"
+                "This archive retains the exact matching application and library sources,\n"
+                "platform licence/credit notices, build records and native updater test receipts.\n"
+                "application/: tagged application source, including build recipes and locks.\n"
+                "libraries/: matching Qt/PySide/Shiboken upstream source archives.\n"
+                "notices/: original Windows/Linux notice ZIPs; each contains REBUILDING.md.\n"
+                "Keep this archive available with redistributions of the application.\n"
+            ),
+        )
+        for name, destination in sorted(contents.items()):
+            bundle.write(inputs / name, destination)
+        bundle.writestr(
+            "CONTENTS-SHA256SUMS",
+            "".join(
+                f"{digest(inputs / name)}  {destination}\n"
+                for name, destination in sorted(contents.items())
+            ),
+        )
+    write_checksums(output)
+    if {p.name for p in output.iterdir()} != PUBLIC_ASSETS:
+        raise ValueError("Unexpected files in the final public release output.")
+    return output / SUPPORT_ARCHIVE
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -104,9 +207,14 @@ def main():
     stage.add_argument("--include-qt-sources", action="store_true")
     checksum = commands.add_parser("checksums")
     checksum.add_argument("directory", type=Path)
+    assemble = commands.add_parser("assemble")
+    assemble.add_argument("--input", type=Path, required=True)
+    assemble.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "stage":
         print(stage_release(args.build, args.rid, args.output, args.include_qt_sources))
+    elif args.command == "assemble":
+        print(assemble_release(args.input, args.output))
     else:
         write_checksums(args.directory)
 

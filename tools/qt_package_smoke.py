@@ -197,10 +197,12 @@ def run_smoke(report_path):
             return original_inspect(*args, **kwargs)
 
         beatmap_downloads.inspect_archive = inspect_once
-        first = Downloader((mirror,), Client(), interval=0).run([checksum], folder)
+        first = Downloader((mirror,), Client(), interval=0, report_dir=folder / "reports").run(
+            [checksum], folder
+        )
         require(first["results"][0]["state"] == "Ready", "The fixture download did not finish.")
         count = len(calls)
-        again = Downloader((mirror,), Client(), interval=0).run(
+        again = Downloader((mirror,), Client(), interval=0, report_dir=folder / "reports").run(
             read_download_queue(folder)["hashes"], folder
         )
         require(
@@ -217,7 +219,11 @@ def run_smoke(report_path):
             if dialog.job:
                 raise RuntimeError("Packaged Qt dialog did not finish.")
 
-        download = DownloadDialog(window, Downloader((mirror,), Client(), interval=0), (mirror,))
+        download = DownloadDialog(
+            window,
+            Downloader((mirror,), Client(), interval=0, report_dir=folder / "reports"),
+            (mirror,),
+        )
         window._open_dialog("download_dialog", download)
         download.directory.setText(str(folder))
         download.start()
@@ -233,7 +239,11 @@ def run_smoke(report_path):
             window.map_model.index(0, 3).data() == "Downloaded",
             "The library did not mark the completed archive as Downloaded.",
         )
-        resumed = DownloadDialog(window, Downloader((mirror,), Client(), interval=0), (mirror,))
+        resumed = DownloadDialog(
+            window,
+            Downloader((mirror,), Client(), interval=0, report_dir=folder / "reports"),
+            (mirror,),
+        )
         window._open_dialog("download_dialog", resumed)
         resumed.restore_queue(str(folder))
         finish(resumed)

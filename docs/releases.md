@@ -66,7 +66,7 @@ hyphen convention and are excluded from automatic stable updates.
 The updater uses the existing platform executable and SHA256SUMS assets on that
 GitHub release. Keep both filenames unchanged. No extra update feed or hosting
 service is needed. Both executable builds retain notices inside the app, and the
-release retains the matching separate source/notice assets.
+release retains matching sources and notices in the combined support archive.
 
 Every one-file build also runs `scripts/check_portable_update.py` on private
 copies: old process exit, executable replacement, restarted GUI acknowledgement
@@ -80,11 +80,30 @@ remain separate.
 
 ## Licence and source assets
 
-Each release also contains platform notice ZIPs, the exact tagged application
-source (`CollectionsStudio-source.tar.gz`), matching Qt/PySide/Shiboken source
-archives, and `SHA256SUMS`. They accompany the single application binaries; no
-notice ZIP needs extracting to run the app. Notices are also embedded and readable
-through Tools → Credits and licences. Keep the notice/source assets with any
+The workflow uploads exactly four public files:
+
+- `CollectionsStudio-windows-x64.exe`
+- `CollectionsStudio-linux-x64`
+- `SHA256SUMS`
+- `CollectionsStudio-sources-and-notices.zip`
+
+Download the executable for your platform to run the app. The updater continues to
+use the same executable names and `SHA256SUMS`; checksums cover both binaries and
+the combined archive. CI's per-platform build artifacts remain separate internally.
+GitHub also adds its standard repository source ZIP/tarball links automatically;
+these are separate from the four workflow-uploaded files.
+Both tagged releases and build-only workflow runs produce the four-file
+`public-release` artifact. Only tag pushes publish it to GitHub Releases.
+The release assembler checks both builds' manifests, native updater receipts and
+locked upstream source hashes, and rejects missing or unexpected input files.
+
+The combined archive retains the original files byte-for-byte: `application/`
+contains the exact tagged application source (`CollectionsStudio-source.tar.gz`),
+`libraries/` contains the matching Qt/PySide/Shiboken archives, and `notices/`
+contains both platform notice ZIPs, including rebuild instructions and build/test
+records. `CONTENTS-SHA256SUMS` hashes those nested files. Nothing in this archive
+needs extracting to run the app. Notices are also embedded and readable
+through Tools → Credits and licences. Keep the combined archive with any
 redistribution. They cover the library notices and the source/recombination route
 under LGPLv3 section 4(d)(0); publishing only the EXE/ELF omits that release material.
 The application remains MIT licensed and permits rebuilding with modified libraries.
@@ -124,8 +143,9 @@ enabled required a new `Microsoft.NET.ILLink.Tasks` 8.0.31 dependency and failed
 with NU1004. Updating that lock and establishing Realm/reflection-based JSON
 compatibility require separate work; no dependency locks were relaxed or changed.
 
-To rebuild against modified Qt/PySide/Shiboken, extract the application and matching
-upstream source assets. Build the changed libraries/wheels using the instructions
+To rebuild against modified Qt/PySide/Shiboken, extract the combined archive, then
+the application and matching upstream source archives inside it. Build the changed
+libraries/wheels using the instructions
 in those source trees. In the prepared application environment, install your
 compatible modified wheels/libraries, then invoke the builder through that
 environment's Python, or use `uv run --no-sync` so a sync does not replace your

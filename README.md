@@ -13,7 +13,7 @@ Windows x64 uses `CollectionsStudio-windows-x64.exe`, with no installer. Linux x
 uses `CollectionsStudio-linux-x64`; make it executable with `chmod +x` and run it.
 Python and .NET are bundled. Linux requires glibc 2.35+ and desktop system libraries;
 see [platform requirements and release assets](docs/releases.md). Releases also
-include matching sources, third-party notices and checksums.
+include checksums and one combined archive of matching sources and third-party notices.
 
 Portable builds check for newer stable GitHub releases in the background. Use
 **Tools → Check for updates… → Download and restart** to verify the download,

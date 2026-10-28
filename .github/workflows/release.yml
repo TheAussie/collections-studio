@@ -124,14 +124,11 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-  release:
-    name: Publish tagged release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  assemble:
+    name: Assemble public release files
     needs: build
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    permissions:
-      contents: write
     defaults:
       run:
         shell: bash
@@ -154,15 +151,47 @@ jobs:
       - name: Download both verified builds
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: "*-release"
+          pattern: "*-x64-release"
           merge-multiple: true
-          path: release-assets
+          path: release-inputs
 
-      - name: Include matching application source and checksums
+      - name: Assemble four public release files
         run: |
           git archive --format=tar.gz --prefix=CollectionsStudio/ \
-            --output=release-assets/CollectionsStudio-source.tar.gz HEAD
-          uv run --no-project --python 3.12.14 python desktop/package_release.py checksums release-assets
+            --output=release-inputs/CollectionsStudio-source.tar.gz HEAD
+          uv run --no-project --python 3.12.14 python desktop/package_release.py assemble \
+            --input release-inputs --output release-assets
+
+      - name: Upload four assembled release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-release
+          path: |
+            release-assets/CollectionsStudio-windows-x64.exe
+            release-assets/CollectionsStudio-linux-x64
+            release-assets/SHA256SUMS
+            release-assets/CollectionsStudio-sources-and-notices.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish tagged release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: assemble
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download four assembled release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: public-release
+          path: release-assets
 
       - name: Create GitHub release
         env:
@@ -174,13 +203,23 @@ jobs:
           Windows: run CollectionsStudio-windows-x64.exe; no installer is needed.
           Linux: chmod +x CollectionsStudio-linux-x64, then run it directly; no AppImage is used.
 
-          Credits and licences are available inside the app. Matching application and
-          Qt/PySide/Shiboken sources, platform notices and SHA256SUMS accompany these
-          executables. Rebuilding/library replacement instructions are in REBUILDING.md
-          inside the platform notices ZIPs. Keep the source and notice assets with redistributions.
+          Download only your platform's executable to run Collections Studio.
+          SHA256SUMS verifies the downloads and is used by the built-in updater.
+
+          CollectionsStudio-sources-and-notices.zip contains the matching application
+          and Qt/PySide/Shiboken sources, both platform notice ZIPs and build/test records.
+          Rebuilding/library replacement instructions are in REBUILDING.md inside the
+          platform notice ZIPs. Credits and licences are also available inside the app.
+          Keep the combined sources-and-notices archive with redistributions.
           NOTES
           args=(--verify-tag --generate-notes --notes-file release-notes.md --title "$RELEASE_TAG")
           if [[ "$RELEASE_TAG" == *-* ]]; then
             args+=(--prerelease)
           fi
-          gh release create "$RELEASE_TAG" "${args[@]}" release-assets/*
+          assets=(
+            release-assets/CollectionsStudio-windows-x64.exe
+            release-assets/CollectionsStudio-linux-x64
+            release-assets/SHA256SUMS
+            release-assets/CollectionsStudio-sources-and-notices.zip
+          )
+          gh release create "$RELEASE_TAG" "${args[@]}" "${assets[@]}"

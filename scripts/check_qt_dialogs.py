@@ -147,7 +147,9 @@ def main():
 
     archive_folder = output / "downloads"
     archive_folder.mkdir(exist_ok=True)
-    download = DownloadDialog(window, PausingDownloader(client=Client(), interval=0))
+    download = DownloadDialog(
+        window, PausingDownloader(client=Client(), interval=0, report_dir=output / "reports")
+    )
     window._open_dialog("download_dialog", download)
     download.directory.setText(str(archive_folder))
     capture(
@@ -160,7 +162,7 @@ def main():
     download.cancel()
     wait(lambda: download.job is None)
     assert len(read_download_queue(archive_folder)["hashes"]) == 3
-    assert "2 pending" in download.status.text()
+    assert "2 remaining" in download.status.text()
     capture(
         download,
         "downloads-paused.png",
@@ -174,7 +176,9 @@ def main():
     )
     download.close()
     app.processEvents()
-    resumed = DownloadDialog(window, Downloader(client=Client(), interval=0))
+    resumed = DownloadDialog(
+        window, Downloader(client=Client(), interval=0, report_dir=output / "reports")
+    )
     window._open_dialog("download_dialog", resumed)
     resumed.restore_queue(str(archive_folder))
     wait(lambda: resumed.job is None)

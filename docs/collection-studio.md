@@ -314,15 +314,22 @@ Choose a save folder, then **Download missing** or select rows and choose
 and individual result details. **Cancel** keeps completed archives and the saved
 queue, removing only the partial archive in progress. A network read can take up
 to 15 seconds to cancel. Use **Resume remaining** in the same window to continue;
-**Retry failed** retries failed/cancelled entries, while Resume also includes maps
-that have not been reached yet.
+**Resume remaining** continues only cancelled/interrupted and not-yet-started
+entries. Failed entries stay failed until **Retry failed** (or an explicit
+**Download selected**) is chosen. The downloaded, installed, remaining and failed
+counts use the same definitions while running and after cancelling. An unfinished
+cancelled entry remains in the remaining count; failed attempts are listed separately.
 
 To continue after closing the manager, open a collection file (or create an empty
 one), choose **Get missing maps… → Resume queue…**, and select the original download
 folder. The **Saved download queue** scope restores all requested hashes and the
 last enabled mirrors. Completed rows immediately show **Already downloaded**, with
 their beatmap labels and a count of what remains. Click **Resume remaining**.
-Maps already installed according to the loaded inventory are skipped. Previously
+Maps already installed according to the loaded inventory are skipped. If osu! has
+consumed an archive saved directly into Songs, matching set folders are checked
+in the background for the exact requested `.osu` MD5s. Matches show **Already
+installed**, require no mirror request and are cached by file identity/timestamps.
+A matching folder name alone never proves completion. Previously
 verified archives with unchanged file identity, size and timestamps reuse their
 saved metadata; their ZIP contents are not reopened or rehashed, and no mirror
 request is made for them. Changed or missing archives return to the remaining work;
@@ -338,8 +345,17 @@ network request, including every not-yet-started hash. Later batches in the same
 folder add to its queue, so the saved scope may span several collections or imports.
 The queue stores hashes and mirror names. The version-2 index stores each verified
 archive's file identity/timestamps and exact map metadata. Loading it checks those
-file attributes; it does not edit collections or mark files as installed. Per-run reports retain
-attempt details. For archives downloaded before saved queues were introduced,
+file attributes; it also retains exact installed-file records and failed/cancelled
+outcomes independently of per-run reports. Existing reports in an older download
+folder are read once to recover failure history across runs; a new report never
+discards an older run's untouched entries. No existing reports are moved or deleted.
+
+New per-run reports retain attempt details in the app-data `CollectionsStudio/download-reports`
+folder (`~/.local/share` / `XDG_DATA_HOME` on Linux, `%LOCALAPPDATA%` on Windows).
+Only the newest 10 reports there are retained automatically. Cleanup never touches
+Songs folders, `.osz` files or the saved queue/index. Reports are diagnostics;
+resume uses the durable queue/index rather than requiring one report filename.
+For archives downloaded before saved queues were introduced,
 reopen the source collection, use **Browse…** to select the old folder, and start
 **Download missing**; the existing download index still allows verified reuse.
 

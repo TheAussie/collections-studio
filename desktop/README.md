@@ -226,5 +226,5 @@ The default local recipe above still creates a portable folder. Add `--onefile`
 to `desktop/build_desktop.py` for one Windows EXE or one Linux ELF executable;
 the complete runtime/helper/notices are embedded and unpacked at startup. The
 GitHub release workflow selects this mode on each native runner and attaches
-notices, corresponding sources and checksums. See [release instructions](../docs/releases.md)
+checksums and one combined sources-and-notices ZIP. See [release instructions](../docs/releases.md)
 for tag/manual triggers, Linux requirements and rebuilding with modified libraries.

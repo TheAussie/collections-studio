@@ -1,6 +1,7 @@
 import hashlib
 import threading
 import time
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -149,7 +150,7 @@ def test_qt_cancel_reopen_resume_reuses_completed_archive_and_keeps_untouched_ha
     assert dialog.model.states[B]["state"] == "Cancelled"
     assert checksum_c not in dialog.model.states
     assert read_download_queue(tmp_path)["hashes"] == [A, B, checksum_c]
-    assert "Paused" in dialog.status.text() and "1 pending" in dialog.status.text()
+    assert "Paused" in dialog.status.text() and "2 remaining" in dialog.status.text()
     assert not list(tmp_path.glob("*.part"))
     assert changed_threads and set(changed_threads) == {threading.get_ident()}
     dialog.close()
@@ -213,6 +214,58 @@ def test_cancel_before_worker_starts_still_saves_the_whole_queue(app, tmp_path):
     assert read_download_queue(tmp_path)["hashes"] == [A, B]
     assert not worker.client.calls
     assert "Paused" in dialog.status.text()
+
+
+def test_resume_counts_exclude_failures_and_cancel_does_not_change_the_total(app, tmp_path):
+    stop = threading.Event()
+    first = engine({ONE.lookup.format(md5=A): urllib.error.URLError("fixture unavailable")}, (ONE,))
+
+    def pause(event):
+        if event["kind"] == "result":
+            stop.set()
+
+    first.run([A, B], tmp_path, pause, stop)
+    entered = threading.Event()
+    holder = []
+
+    def response():
+        def paused_read():
+            entered.set()
+            holder[0].job.stop.wait(4)
+
+        return Response(archive_bytes(), on_read=paused_read)
+
+    worker = engine(
+        {ONE.lookup.format(md5=B): lookup(B), ONE.download.format(id=7): response}, (ONE,)
+    )
+    dialog = downloads(app, worker)
+    holder.append(dialog)
+    dialog.restore_queue(str(tmp_path))
+    until(lambda: dialog.job is None)
+    assert "1 remaining" in dialog.count.text() and "1 failed" in dialog.count.text()
+    assert dialog.retry_button.isEnabled()
+    dialog.start_button.click()
+    until(entered.is_set)
+    until(lambda: dialog.prepared)
+    assert dialog.total == 1
+    assert "1 remaining" in dialog.count.text() and "1 failed" in dialog.count.text()
+    dialog.cancel()
+    until(lambda: dialog.job is None)
+    assert "1 remaining" in dialog.status.text() and "1 failed" in dialog.status.text()
+    assert worker.client.calls == [ONE.lookup.format(md5=B), ONE.download.format(id=7)]
+    assert dialog.model.states[A]["state"] == "Failed"
+    assert dialog.model.states[B]["state"] == "Cancelled"
+
+    # Only an explicit Retry failed can submit A; B remains resumable separately.
+    retry = engine(
+        {ONE.lookup.format(md5=A): lookup(), ONE.download.format(id=7): archive_bytes()}, (ONE,)
+    )
+    dialog.downloader = retry
+    dialog.retry_button.click()
+    until(lambda: dialog.job is None)
+    assert retry.client.calls == [ONE.lookup.format(md5=A), ONE.download.format(id=7)]
+    assert dialog.model.states[A]["state"] == "Ready"
+    assert dialog.model.states[B]["state"] == "Cancelled"
 
 
 def test_download_close_waits_for_cleanup_and_cannot_discard_queue(app, tmp_path):

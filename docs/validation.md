@@ -282,3 +282,31 @@ pending the next Windows VM build; local Linux checks do not establish it. The
 project version remains 0.1.0: choose/update the next project+lock version before
 tagging. CI rejects mismatched tags to prevent repeated self-update offers. No
 commit, push, workflow dispatch, tag or publication was performed by this work.
+
+
+## Saved-download resume regression checks
+
+Resume and Retry failed are separate operations. Regression fixtures cover a
+cancelled batch with completed, failed and never-started hashes; restoration
+from multiple older reports; repeated resume with no failed-entry network calls;
+and explicit retry of failed rows. Qt checks confirm the remaining/failed totals
+stay consistent through pause, close/reopen, resume and cancel.
+
+Synthetic Songs folders simulate osu! consuming an archive. Exact installed
+`.osu` MD5s are recognised without downloads; later restores use verified file
+identity/timestamps. Wrong revisions and changed cached files are not accepted.
+Report tests check app-data storage, a maximum of 10 reports, durable failure
+states after old reports disappear, and preservation of archives and queue files.
+The packaged smoke and screenshot harnesses use isolated report directories.
+
+
+## Public release asset assembly
+
+The public assembler emits only the Windows EXE, Linux executable, SHA256SUMS and
+CollectionsStudio-sources-and-notices.zip. Regression tests inspect the combined
+archive and its inner checksums to ensure application/library sources and both
+platform notice ZIPs retain their original bytes. Missing, extra, modified or
+wrong-platform inputs are rejected before creating public files. Existing output
+directories are never overwritten. Both updater platform paths download and
+verify their executable using a synthetic four-file release and its real generated
+checksum manifest. The native build/rehearsal gates remain enabled on both runners.

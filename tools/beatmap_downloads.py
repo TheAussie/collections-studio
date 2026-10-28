@@ -4,7 +4,9 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -28,6 +30,43 @@ MAX_JSON = 8 * 1024 * 1024
 QUEUE_FILE = ".collections-download-queue.json"
 INDEX_FILE = ".collections-downloads.json"
 MAX_QUEUE = 32 * 1024 * 1024
+
+
+def report_directory():
+    if sys.platform == "win32":
+        root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        root = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return root / "CollectionsStudio" / "download-reports"
+
+
+def download_counts(hashes, states):
+    ready = sum(states.get(h, {}).get("state") == "Ready" for h in hashes)
+    failed = sum(states.get(h, {}).get("state") == "Failed" for h in hashes)
+    installed = sum(
+        states.get(h, {}).get("state") == "Ready" and states[h].get("installed", False)
+        for h in hashes
+    )
+    return ready, len(hashes) - ready - failed, failed, installed
+
+
+def _write_report(document, folder=None):
+    folder = report_directory() if folder is None else Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"download-report-{uuid.uuid4().hex[:12]}.json"
+    _private_json(path, document)
+    reports = sorted(
+        (p for p in folder.glob("download-report-*.json") if p.is_file() and not p.is_symlink()),
+        key=lambda p: (p == path, p.stat().st_mtime_ns),
+        reverse=True,
+    )
+    for old in reports[10:]:
+        if old != path:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    return path
 
 
 class Cancelled(Exception):
@@ -309,7 +348,7 @@ def read_download_queue(directory):
 
 def _download_index(directory):
     path = Path(directory) / INDEX_FILE
-    empty = {"version": 2, "hashes": {}, "archives": {}}
+    empty = {"version": 2, "hashes": {}, "archives": {}, "installed": {}, "outcomes": {}}
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_QUEUE:
             return empty
@@ -322,6 +361,13 @@ def _download_index(directory):
             "archives": saved.get("archives", {})
             if saved.get("version") == 2 and isinstance(saved.get("archives"), dict)
             else {},
+            "installed": saved.get("installed", {})
+            if isinstance(saved.get("installed"), dict)
+            else {},
+            "outcomes": saved.get("outcomes", {})
+            if isinstance(saved.get("outcomes"), dict)
+            else {},
+            "history_imported": saved.get("history_imported") is True,
         }
     except (ValueError, OSError):
         return empty
@@ -402,17 +448,7 @@ def _completed_archive(path, record):
             if (
                 not valid_hash(checksum)
                 or checksum != checksum.lower()
-                or not isinstance(details, dict)
-            ):
-                return None
-            if any(
-                not isinstance(details.get(key, ""), str) or len(details.get(key, "")) > 2048
-                for key in ("Title", "Artist", "Difficulty", "Mode")
-            ):
-                return None
-            if any(
-                value is not None and (type(value) is not int or value <= 0)
-                for value in (details.get("BeatmapId"), details.get("SetId"))
+                or not _valid_map_details(details)
             ):
                 return None
         return maps
@@ -420,13 +456,155 @@ def _completed_archive(path, record):
         return None
 
 
-def load_download_progress(directory, stop=None):
-    """Restore completed rows with metadata checks only; leave changed files pending."""
+def _valid_map_details(details):
+    return (
+        isinstance(details, dict)
+        and all(
+            isinstance(details.get(k, ""), str) and len(details.get(k, "")) <= 2048
+            for k in ("Title", "Artist", "Difficulty", "Mode")
+        )
+        and all(
+            v is None or (type(v) is int and v > 0)
+            for v in (details.get("BeatmapId"), details.get("SetId"))
+        )
+    )
+
+
+def _saved_outcomes(directory, index, stop):
+    outcomes = dict(index["outcomes"])
+    if index.get("history_imported"):
+        return outcomes
+    # Older clients kept failed states only in per-run reports. Read all runs in
+    # order, preserving hashes that a later, smaller run never reached.
+    reports = sorted(
+        (p for p in Path(directory).glob("download-report-*.json") if not p.is_symlink()),
+        key=lambda p: p.stat().st_mtime_ns,
+    )
+    for path in reports:
+        _check_cancel(stop)
+        try:
+            if not path.is_file() or path.stat().st_size > MAX_QUEUE:
+                continue
+            report = json.loads(path.read_bytes())
+            for result in report.get("results", []):
+                if not isinstance(result, dict) or not valid_hash(result.get("hash")):
+                    continue
+                state = result.get("state")
+                if state in ("Ready", "Failed", "Cancelled"):
+                    outcomes[result["hash"].lower()] = {
+                        "state": state,
+                        "message": str(result.get("message", ""))[:2048],
+                    }
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return outcomes
+
+
+def _installed_completions(directory, hashes, index, completed, stop):
+    root = Path(directory).resolve()
+    records = dict(index["installed"])
+    wanted = set(hashes) - completed.keys()
+    for checksum in list(wanted):
+        record = records.get(checksum)
+        try:
+            path = root / record["file"]
+            if (
+                path.suffix.lower() != ".osu"
+                or not _valid_map_details(record.get("details"))
+                or path.is_symlink()
+                or not path.resolve().is_relative_to(root)
+                or _archive_signature(path) != record["signature"]
+            ):
+                continue
+            completed[checksum] = {
+                "hash": checksum,
+                "state": "Ready",
+                "file": str(path.resolve()),
+                "details": record["details"],
+                "mirror": "Installed",
+                "reused": True,
+                "installed": True,
+                "verification": "unchanged",
+            }
+            wanted.remove(checksum)
+        except (TypeError, KeyError, OSError, DownloadError):
+            continue
+    candidates, metadata = set(), {}
+    for filename, record in index["archives"].items():
+        maps = record.get("maps", {}) if isinstance(record, dict) else {}
+        if not isinstance(maps, dict):
+            continue
+        relevant = wanted.intersection(maps)
+        match = re.fullmatch(r"(\d+)(?:-[0-9a-f]+)?\.osz", filename)
+        if relevant and match:
+            candidates.add(int(match[1]))
+            metadata.update({h: maps[h] for h in relevant if _valid_map_details(maps[h])})
+    if not candidates:
+        return records
+    # osu! stable consumes .osz files placed in Songs. Recognise the resulting
+    # folders only after checking exact .osu bytes, never just a set ID/name.
+    for folder in root.iterdir():
+        _check_cancel(stop)
+        match = re.match(r"(\d+)(?:\s|$)", folder.name)
+        if (
+            not match
+            or int(match[1]) not in candidates
+            or folder.is_symlink()
+            or not folder.is_dir()
+        ):
+            continue
+        for path in folder.iterdir():
+            _check_cancel(stop)
+            if path.suffix.lower() != ".osu" or path.is_symlink():
+                continue
+            try:
+                before = _archive_signature(path)
+                if before["size"] > MAX_OSU:
+                    continue
+                checksum = hashlib.md5(usedforsecurity=False)
+                size = 0
+                with path.open("rb") as stream:
+                    while block := stream.read(CHUNK):
+                        _check_cancel(stop)
+                        size += len(block)
+                        if size > MAX_OSU:
+                            raise DownloadError("An installed .osu file exceeds 32 MiB.")
+                        checksum.update(block)
+                checksum = checksum.hexdigest()
+                if checksum not in wanted or _archive_signature(path) != before:
+                    continue
+                details = metadata.get(checksum, {})
+                records[checksum] = {
+                    "file": path.relative_to(root).as_posix(),
+                    "signature": before,
+                    "details": details,
+                }
+                completed[checksum] = {
+                    "hash": checksum,
+                    "state": "Ready",
+                    "file": str(path.resolve()),
+                    "details": details,
+                    "mirror": "Installed",
+                    "reused": True,
+                    "installed": True,
+                    "verification": "exact MD5",
+                }
+                wanted.remove(checksum)
+            except (OSError, DownloadError):
+                continue
+    return records
+
+
+def load_download_progress(directory, stop=None, *, hashes=None):
+    """Restore archives, failure history and exact installed files without network or writes."""
     queue = read_download_queue(directory)
     if queue is None:
         return None
+    stop = stop or threading.Event()
+    hashes = queue["hashes"] if hashes is None else hashes
     index, completed, checked = _download_index(directory), {}, {}
-    for checksum in queue["hashes"]:
+    outcomes = _saved_outcomes(directory, index, stop)
+    for checksum in hashes:
         if stop:
             _check_cancel(stop)
         old = index["hashes"].get(checksum)
@@ -447,11 +625,28 @@ def load_download_progress(directory, stop=None):
                 "reused": True,
                 "verification": "unchanged",
             }
-    return {**queue, "completed": completed, "legacy_index": index["version"] != 2}
+    installed = _installed_completions(directory, hashes, index, completed, stop)
+    failed = {
+        h: {"hash": h, **outcomes[h]}
+        for h in hashes
+        if h not in completed
+        and isinstance(outcomes.get(h), dict)
+        and outcomes[h].get("state") == "Failed"
+    }
+    return {
+        **queue,
+        "completed": completed,
+        "failed": failed,
+        "installed": installed,
+        "outcomes": outcomes,
+        "legacy_index": index["version"] != 2,
+    }
 
 
 class Downloader:
-    def __init__(self, mirrors=MIRRORS, client=None, interval=1.0, now=time.monotonic):
+    def __init__(
+        self, mirrors=MIRRORS, client=None, interval=1.0, now=time.monotonic, *, report_dir=None
+    ):
         self.mirrors = tuple(mirrors)
         self.client = client or HttpClient()
         self.interval = interval
@@ -459,6 +654,7 @@ class Downloader:
         self.last_request = {}
         self.cooldowns = {}
         self.failures = {}
+        self.report_dir = report_dir
 
     def _open(self, mirror, url, stop):
         _check_cancel(stop)
@@ -582,7 +778,7 @@ class Downloader:
                     raise DownloadError("The download is empty or incomplete.")
         _check_cancel(stop)
 
-    def run(self, hashes, directory, emit=lambda _event: None, stop=None):
+    def run(self, hashes, directory, emit=lambda _event: None, stop=None, *, retry_failed=False):
         stop = stop or threading.Event()
         hashes = list(dict.fromkeys(value.lower() for value in hashes if valid_hash(value)))
         directory = Path(directory).resolve()
@@ -603,8 +799,46 @@ class Downloader:
         )
         index_path = directory / INDEX_FILE
         saved_index = _download_index(directory)
+        preparation_cancelled = False
+        try:
+            progress = load_download_progress(directory, stop, hashes=hashes)
+        except Cancelled:
+            preparation_cancelled = True
+            progress = {
+                "completed": {},
+                "failed": {},
+                "installed": saved_index["installed"],
+                "outcomes": saved_index["outcomes"],
+            }
+        outcomes = progress["outcomes"]
+        saved_index.update(
+            installed=progress["installed"],
+            outcomes=outcomes,
+            history_imported=saved_index.get("history_imported", False)
+            if preparation_cancelled
+            else True,
+        )
+        restored = {**progress["failed"], **progress["completed"]}
+        work = [
+            h
+            for h in hashes
+            if h not in progress["completed"] and (retry_failed or h not in progress["failed"])
+        ]
+        if preparation_cancelled:
+            work = []
+        if retry_failed:
+            for h in work:
+                if h in progress["failed"]:
+                    restored[h] = {
+                        "hash": h,
+                        "state": "Queued",
+                        "message": "Explicit retry requested.",
+                    }
+        if not preparation_cancelled:
+            emit({"kind": "snapshot", "states": restored, "hashes": hashes, "remaining": len(work)})
         index, archives = saved_index["hashes"], saved_index["archives"]
-        available, checked, results = {}, {}, []
+        available, checked = {}, {}
+        results = {h: {**r, "skipped": True} for h, r in restored.items() if h not in work}
         unchanged, newly_verified = set(), set()
         index_dirty = False
 
@@ -628,7 +862,19 @@ class Downloader:
                     available[value] = (path, details)
                     index[value] = {"file": path.name, "set_id": details.get("SetId")}
 
-        for checksum in hashes:
+        def save_index():
+            _private_json(
+                index_path,
+                {
+                    **saved_index,
+                    "version": 2,
+                    "hashes": index,
+                    "archives": archives,
+                    "outcomes": outcomes,
+                },
+            )
+
+        for checksum in work:
             attempts = []
             set_id, details = None, {}
             result = {"hash": checksum, "state": "Failed", "attempts": attempts}
@@ -677,25 +923,38 @@ class Downloader:
                     for fresh_path in newly_verified:
                         archives[fresh_path.name]["signature"] = _archive_signature(fresh_path)
                     newly_verified.clear()
-                    _private_json(index_path, {"version": 2, "hashes": index, "archives": archives})
+                    save_index()
                     index_dirty = False
             except Cancelled:
                 result.update(state="Cancelled", message="Cancelled; partial download removed.")
             except (DownloadError, OSError, ValueError) as error:
                 result.update(message=str(error), set_id=set_id, details=details)
-            results.append(result)
+            results[checksum] = result
+            outcomes[checksum] = {
+                "state": result["state"],
+                "message": result.get("message", "")[:2048],
+            }
             emit({"kind": "result", **result})
             if stop.is_set():
                 break
+        save_index()
+        results = [results[h] for h in hashes if h in results]
+        ready, remaining, failed, installed = download_counts(
+            hashes, {r["hash"]: r for r in results}
+        )
         report = {
             "created_at": datetime.now(UTC).isoformat(),
             "mirrors": [asdict(m) for m in self.mirrors],
             "requested": len(hashes),
             "cancelled": stop.is_set(),
+            "preparation_cancelled": preparation_cancelled,
             "results": results,
+            "ready": ready,
+            "remaining": remaining,
+            "failed": failed,
+            "installed": installed,
         }
-        report_path = directory / f"download-report-{uuid.uuid4().hex[:12]}.json"
-        _private_json(report_path, report)
+        report_path = _write_report(report, self.report_dir)
         return {**report, "report_path": str(report_path), "queue_path": str(queue_path)}
 
     def _fetch_set(self, set_id, checksum, directory, stop, emit, attempts, remember):

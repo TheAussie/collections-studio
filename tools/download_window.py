@@ -6,7 +6,13 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from tools.beatmap_downloads import MIRRORS, Downloader, DownloadError, read_download_queue
+from tools.beatmap_downloads import (
+    MIRRORS,
+    Downloader,
+    DownloadError,
+    download_counts,
+    load_download_progress,
+)
 
 SAVED_SCOPE = "Saved download queue"
 
@@ -235,6 +241,11 @@ class DownloadWindow:
         self.controls()
 
     def controls(self):
+        ready, pending, failed, installed = download_counts(self.hashes, self.states)
+        self.count.set(
+            f"{ready - installed:,} downloaded · {installed:,} installed · "
+            f"{pending:,} remaining · {failed:,} failed"
+        )
         self.start_button.configure(
             text="Resume remaining" if self.resume_mode else "Download missing"
         )
@@ -272,7 +283,7 @@ class DownloadWindow:
         if not directory:
             return
         try:
-            saved = read_download_queue(directory)
+            saved = load_download_progress(directory)
             if saved is None:
                 raise DownloadError(
                     "This folder has no saved download queue. Choose its original folder."
@@ -295,6 +306,9 @@ class DownloadWindow:
                 flag.set(name in saved["mirrors"])
         self.resume_mode = True
         self.scan()
+        self.states.update(saved["failed"])
+        self.states.update(saved["completed"])
+        self.refresh()
         self.status.set(
             "Saved queue loaded. Resume remaining checks completed archives and downloads the rest."
         )
@@ -318,7 +332,7 @@ class DownloadWindow:
             hashes = [
                 checksum
                 for checksum in hashes
-                if self.states.get(checksum, {}).get("state") in ("Failed", "Cancelled")
+                if self.states.get(checksum, {}).get("state") == "Failed"
             ]
         if not hashes:
             self.status.set("No missing maps in this selection.")
@@ -344,7 +358,13 @@ class DownloadWindow:
 
         def work():
             try:
-                result = self.downloader.run(hashes, directory, self.events.put, self.stop)
+                result = self.downloader.run(
+                    hashes,
+                    directory,
+                    self.events.put,
+                    self.stop,
+                    **({"retry_failed": True} if retry or selected else {}),
+                )
                 self.events.put({"kind": "done", "report": result})
             except Exception as error:
                 self.events.put({"kind": "error", "message": str(error)})
@@ -356,11 +376,21 @@ class DownloadWindow:
             while True:
                 event = self.events.get_nowait()
                 kind, checksum = event["kind"], event.get("hash")
-                if kind in ("item", "result"):
+                if kind == "snapshot":
+                    for h in event["hashes"]:
+                        self.states.pop(h, None)
+                    self.states.update(event["states"])
+                    self.total = event["remaining"]
+                    for h, state in event["states"].items():
+                        if state["state"] == "Ready" and state.get("installed"):
+                            self.workspace.present_hashes.add(h)
+                            self.workspace.beatmaps[h] = {**state["details"], "Available": True}
+                    self.refresh()
+                elif kind in ("item", "result"):
                     self.states.setdefault(checksum, {}).update(event)
                     if kind == "result":
                         self.completed += 1
-                        self.progress.configure(value=100 * self.completed / self.total)
+                        self.progress.configure(value=100 * self.completed / max(1, self.total))
                         if event["state"] == "Ready":
                             self.workspace.downloaded[checksum] = event["file"]
                             self.workspace.beatmaps[checksum] = event["details"]
@@ -382,13 +412,15 @@ class DownloadWindow:
                     if kind == "done":
                         report = event["report"]
                         self.report_path = report["report_path"]
-                        ready = sum(result["state"] == "Ready" for result in report["results"])
-                        pending = report.get("requested", self.total) - len(report["results"])
+                        ready, pending, failed, installed = download_counts(
+                            self.hashes, self.states
+                        )
                         self.resume_mode = True
                         self.status.set(
                             ("Paused. " if report.get("cancelled") else "")
-                            + f"{ready} verified; {len(report['results']) - ready} not ready; "
-                            + f"{pending} pending. Queue saved."
+                            + f"{ready - installed:,} downloaded; {installed:,} installed; "
+                            + f"{pending:,} remaining; {failed:,} failed (Retry failed only). "
+                            "Queue saved."
                         )
                         self.detail.set("Report: " + self.report_path)
                     else:

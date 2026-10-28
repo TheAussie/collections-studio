@@ -17,7 +17,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from tools.beatmap_downloads import MIRRORS, Cancelled, Downloader, load_download_progress
+from tools.beatmap_downloads import (
+    MIRRORS,
+    Cancelled,
+    Downloader,
+    download_counts,
+    load_download_progress,
+)
 from tools.qt_dialog_support import StudioDialog
 from tools.qt_jobs import Job
 from tools.qt_models import HASH_ROLE, ROOT_INDEX
@@ -63,7 +69,13 @@ class DownloadModel(QAbstractTableModel):
         values = (
             title,
             meta.get("Difficulty") or "—",
-            ("Already downloaded" if state.get("reused") else "Ready for import")
+            (
+                "Already installed"
+                if state.get("installed")
+                else "Already downloaded"
+                if state.get("reused")
+                else "Ready for import"
+            )
             if status == "Ready"
             else status,
             state.get("mirror", "—"),
@@ -124,6 +136,7 @@ class DownloadDialog(StudioDialog):
         self.scope.setAccessibleName("Collections to check for missing maps")
         self.scope.currentTextChanged.connect(self.scan)
         self.count = label()
+        self.count.setWordWrap(True)
         scope_row.addWidget(label("Check"))
         scope_row.addWidget(self.scope)
         scope_row.addWidget(self.count, 1)
@@ -220,16 +233,15 @@ class DownloadDialog(StudioDialog):
 
     def controls(self):
         idle = self.job is None
-        downloaded = sum(
-            self.model.states.get(h, {}).get("state") == "Ready" for h in self.model.hashes
+        ready, pending, failed, installed = download_counts(self.model.hashes, self.model.states)
+        self.count.setText(
+            "Queue check cancelled; resume to restore counts."
+            if self.phase == "unchecked"
+            else "Checking saved queue…"
+            if not idle and self.phase == "download" and not self.prepared
+            else f"{ready - installed:,} downloaded · {installed:,} installed · "
+            f"{pending:,} remaining · {failed:,} failed"
         )
-        pending = len(self.model.hashes) - downloaded
-        if downloaded:
-            self.count.setText(f"{downloaded:,} downloaded · {pending:,} remaining")
-        else:
-            self.count.setText(
-                f"{len(self.model.hashes):,} unique hashes missing from this library"
-            )
         for widget in (
             self.scope,
             self.directory,
@@ -245,8 +257,7 @@ class DownloadDialog(StudioDialog):
         self.retry_button.setEnabled(
             idle
             and any(
-                self.model.states.get(h, {}).get("state") in ("Failed", "Cancelled")
-                for h in self.model.hashes
+                self.model.states.get(h, {}).get("state") == "Failed" for h in self.model.hashes
             )
         )
         self.cancel_button.setEnabled(not idle and not self.job.stop.is_set())
@@ -293,11 +304,7 @@ class DownloadDialog(StudioDialog):
             else list(self.model.hashes)
         )
         if retry:
-            hashes = [
-                h
-                for h in hashes
-                if self.model.states.get(h, {}).get("state") in ("Failed", "Cancelled")
-            ]
+            hashes = [h for h in hashes if self.model.states.get(h, {}).get("state") == "Failed"]
         if not hashes:
             self.status.setText("No missing maps in this selection.")
             return
@@ -326,15 +333,22 @@ class DownloadDialog(StudioDialog):
             job.stop.set()
 
         job = Job(
-            lambda stop, _progress: downloader.run(hashes, directory, emit, stop),
+            lambda stop, _progress: downloader.run(
+                hashes,
+                directory,
+                emit,
+                stop,
+                **({"retry_failed": True} if retry or selected else {}),
+            ),
             handles_cancellation=True,
         )
         self.job, self.phase = job, "download"
         self.terminal = None
+        self.prepared = False
         self.completed, self.total = 0, len(hashes)
-        self.progress.setRange(0, self.total)
+        self.progress.setRange(0, 0)
         self.progress.setValue(0)
-        self.status.setText("Using saved download records and downloading remaining maps…")
+        self.status.setText("Checking saved downloads and installed songs before resuming…")
         self.job.signals.finished.connect(self.worker_finished)
         self.controls()
         self.app.pool.start(self.job)
@@ -357,6 +371,7 @@ class DownloadDialog(StudioDialog):
             if token != self.job.token:
                 continue
             self.apply_event(event)
+        self.controls()
         if self.terminal is not None and self.events.empty():
             self.complete(self.terminal)
 
@@ -364,9 +379,26 @@ class DownloadDialog(StudioDialog):
         if self._closed or self.job is None:
             return
         kind, checksum = event["kind"], event.get("hash")
-        if kind in ("item", "result"):
+        if kind == "snapshot":
+            self.prepared = True
+            self.total = event["remaining"]
+            self.progress.setRange(0, max(1, self.total))
+            for h in event["hashes"]:
+                self.model.states.pop(h, None)
+            for h, state in event["states"].items():
+                self.model.states[h] = state
+                if state["state"] == "Ready":
+                    self.remember_ready(h, state)
+            self.model.replace(self.model.hashes)
+            self.status.setText(
+                f"{self.total:,} remaining in this run. Failed entries wait for Retry failed."
+            )
+        elif kind in ("item", "result"):
             self.model.states.setdefault(checksum, {}).update(event)
             if kind == "result":
+                if not self.prepared:
+                    self.prepared = True
+                    self.progress.setRange(0, max(1, self.total))
                 self.completed += 1
                 self.progress.setValue(self.completed)
                 if event["state"] == "Ready":
@@ -390,10 +422,15 @@ class DownloadDialog(StudioDialog):
             self.model.changed(checksum)
 
     def remember_ready(self, checksum, result):
-        details = {**result["details"], "Available": False}
+        installed = result.get("installed", False)
+        details = {**result["details"], "Available": installed}
         self.model.metadata[checksum] = details
         if self.app.workspace is self.workspace:
-            self.workspace.downloaded[checksum] = result["file"]
+            if installed:
+                self.workspace.present_hashes.add(checksum)
+                self.workspace.downloaded.pop(checksum, None)
+            else:
+                self.workspace.downloaded[checksum] = result["file"]
             self.workspace.beatmaps[checksum] = details
 
     def complete(self, outcome):
@@ -425,6 +462,7 @@ class DownloadDialog(StudioDialog):
                         check.setChecked(name in report["mirrors"])
                 self.resume_mode = True
                 self.scan()
+                self.model.states.update(report["failed"])
                 for checksum in self.model.hashes:
                     if checksum in report["completed"]:
                         result = report["completed"][checksum]
@@ -443,7 +481,8 @@ class DownloadDialog(StudioDialog):
                 )
                 self.details.setPlainText(
                     "Keep this folder’s archives and download records together. "
-                    "Ready means ready to import, not installed."
+                    "Downloaded archives are ready to import; "
+                    "Already installed means an exact .osu match."
                 )
         elif error:
             self.status.setText("Download did not complete. Finished archives remain saved.")
@@ -451,20 +490,26 @@ class DownloadDialog(StudioDialog):
             self.error(error)
         else:
             self.report_path = report["report_path"]
-            ready = sum(item["state"] == "Ready" for item in report["results"])
-            reused = sum(item.get("reused", False) for item in report["results"])
-            pending = report.get("requested", self.total) - len(report["results"])
+            ready, pending, failed, installed = download_counts(
+                self.model.hashes, self.model.states
+            )
             self.resume_mode = True
             self.status.setText(
                 ("Paused. " if report.get("cancelled") else "")
-                + f"{ready:,} ready ({reused:,} already downloaded); "
-                + f"{len(report['results']) - ready:,} not ready; "
-                + f"{pending:,} pending. Queue saved."
+                + f"{ready - installed:,} downloaded; {installed:,} installed; "
+                + f"{pending:,} remaining; {failed:,} failed (Retry failed only). Queue saved."
             )
+            if report.get("preparation_cancelled"):
+                self.phase = "unchecked"
+                self.status.setText(
+                    "Paused during saved-queue checks. Resume to restore counts; "
+                    "no downloads were retried."
+                )
             self.details.setPlainText(
                 "Report: "
                 + self.report_path
-                + "\nVerified archives are ready to import into osu!. "
+                + "\nReports are kept in app data; only the latest 10 are retained. "
+                "Verified archives are ready to import into osu!. "
                 "The interrupted archive restarts when resumed."
             )
         self.controls()

@@ -486,7 +486,7 @@ def test_cancelled_queue_can_resume_pending_rows_in_same_window(app, tmp_path):
         app.root.update()
         time.sleep(0.01)
     assert not window.running
-    assert "Paused" in window.status.get() and "1 pending" in window.status.get()
+    assert "Paused" in window.status.get() and "1 remaining" in window.status.get()
     assert window.start_button["text"] == "Resume remaining"
     window.start_button.invoke()
     deadline = time.monotonic() + 3
