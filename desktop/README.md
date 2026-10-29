@@ -47,6 +47,14 @@ song files and existing legacy duplicates remain intact. Every operation support
 Undo and changes only the working session until Save. These new controls are in
 Qt; the classic interface remains available with its existing features.
 
+**Export…** (also **Tools → Export collection.db…**) creates one `collection.db`
+containing **All collections** or checked rows under **Choose collections**.
+Search preserves checks, and the summary counts every checked collection.
+Both stable and lazer sessions support this export, including unsaved collection
+edits. Choose a new filename or folder; existing files are never replaced.
+The exported file is reopened and verified in the background. Export does not
+switch databases, clear Undo, or mark unsaved changes as saved.
+
 **Tools → Get missing maps…** checks the last import, current collection, all
 collections, or a saved queue. Choose mirrors and an archive folder, then download
 all missing maps or a selection. Cancel keeps verified archives and every pending

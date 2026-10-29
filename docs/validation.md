@@ -310,3 +310,18 @@ wrong-platform inputs are rejected before creating public files. Existing output
 directories are never overwritten. Both updater platform paths download and
 verify their executable using a synthetic four-file release and its real generated
 checksum manifest. The native build/rehearsal gates remain enabled on both runners.
+
+
+## Selected and full collection.db exports
+
+The Export action supports both stable and loaded Realm working sessions. Backend
+fixtures verify selected/all contents, snapshot isolation, unsaved edits, Unicode
+and empty collections, duplicate legacy names/entries, original MD5 letter case,
+version markers, source preservation and a single-file result. Existing files,
+dangling symlinks and concurrent destination creation never get overwritten.
+Verification failures and unsupported hard-link publication leave no partial output.
+Qt tests cover checkbox selection, all/selected toggles, filtering without losing
+checks, cancellation/reopening, existing destinations, toolbar integration and
+background exports without changing the opened path, dirty state or Undo history.
+The packaged self-test exercises selected/full exports and includes
+`SelectiveAndFullCollectionDbExport` in its verification receipt.

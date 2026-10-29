@@ -25,6 +25,13 @@ QPushButton#navigation:enabled { background: #35303f; color: #f2edf8;
     border: 1px solid #8e79a6; font-weight: 600; }
 QPushButton#navigation:enabled:hover { background: #494057; border-color: #b6a0ce; }
 QPushButton#navigation:checked { background: #554568; }
+QPushButton#exportMode { background: #29262f; color: #c7c0d0;
+    border: 2px solid #514958; border-radius: 7px; font-weight: 600; padding: 10px 14px; }
+QPushButton#exportMode:hover { background: #3b3445; border-color: #9a84b2; color: #ffffff; }
+QPushButton#exportMode:checked { background: #655078; border: 2px solid #c8b1e4;
+    color: #ffffff; }
+QPushButton#exportMode:checked:hover { background: #745c8a; }
+QPushButton#exportMode:focus { border: 2px solid #eee0ff; }
 QPushButton#danger { background: transparent; color: #d5a7ae; }
 QPushButton:disabled, QToolButton:disabled { color: #716e7b; background: #25242b; }
 QLineEdit, QComboBox { background: #292830; border: 1px solid transparent;

@@ -125,6 +125,33 @@ The classic Tk interface retains **Save new Realm…** / **Save new .db…** wit
 chosen parent folder and a new export directory; its source is left unchanged.
 Existing separate exports are never overwritten.
 
+### Export all or selected collections to collection.db
+
+In Qt, choose the top-bar **Export…** button or **Tools → Export collection.db…**.
+**All collections** includes the complete current collection list. Switch to
+**Choose collections** to tick individual collections; search narrows the list
+without clearing hidden checks. Use **Check all** to tick the whole library or
+**Clear checks** to start a new selection. The summary includes all checked
+collections and difficulty entries, including selections outside the search.
+
+Choose **Export collection.db…** and select a new filename or folder. Cancelling
+the filename picker keeps your checks; cancelling the export dialog creates no
+file. The export runs in the background and reopens the result to verify names,
+hashes, order and the stable format version before publication. Existing files
+and symlinks are refused, including a destination created by another process
+while the export was being prepared. The result is a single database file without
+report/lock sidecars. Its destination needs the same hard-link support as new
+stable-file saves (for example NTFS or a normal Linux filesystem).
+
+Both stable `collection.db` and loaded lazer `client.realm` workspaces can export
+this way. Current unsaved collection edits are included; missing or unresolved
+beatmaps keep their original hashes. Empty collections, duplicate legacy names,
+existing duplicate entries and hash letter case are preserved. Export copies
+memberships without merging collections that happen to have the same name.
+It leaves the opened path, dirty state, source database and Undo history unchanged.
+A collection.db carries names and MD5 memberships, not beatmap files or lazer's
+other data. **Save a copy…** remains available for a full copy in the source format.
+
 Edits remain in memory until Save. Qt keeps the opened path as its source after
 saving and clears the saved undo history. Closing or opening another file asks
 before discarding unsaved changes. Long database operations run in the background.

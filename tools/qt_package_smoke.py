@@ -18,11 +18,13 @@ from tools import beatmap_downloads
 from tools.beatmap_downloads import Downloader, Mirror, read_download_queue
 from tools.collection_application import load_document
 from tools.collection_backend import DLL, ROOT
+from tools.collection_exports import capture_export, export_collection_file
 from tools.collection_workspace import Workspace
 from tools.library_cache import cache_database_inventory
 from tools.qt_collection_studio import StudioWindow
 from tools.qt_dialog_support import finish_shutdown
 from tools.qt_download_dialog import DownloadDialog
+from tools.qt_export_dialog import ExportDialog
 from tools.qt_migration_dialog import MigrationDialog
 from tools.qt_transfer_dialog import TransferDialog
 from tools.stable_collections import encode, read_stable
@@ -70,6 +72,40 @@ def run_smoke(report_path):
         source_id = next(group["Id"] for group in window.workspace.collections if group["Hashes"])
         empty_id = next(
             group["Id"] for group in window.workspace.collections if not group["Hashes"]
+        )
+        export_plan = window.workspace.plan()
+        export_path = window.workspace.source_path
+        export_dirty = window.workspace.dirty
+        export_ui = ExportDialog(window)
+        require(
+            export_ui.model.selected_ids() == {source_id, empty_id},
+            "Full export omitted a collection.",
+        )
+        export_ui.selected_button.setChecked(True)
+        export_ui.model.checked = {empty_id}
+        export_ui.model.changed()
+        require(
+            export_ui.model.selected_ids() == {empty_id},
+            "Selective export chose the wrong collection.",
+        )
+        export_ui.deleteLater()
+        selected_export = export_collection_file(
+            capture_export(window.workspace, {empty_id}), folder / "selected collection.db"
+        )
+        require(
+            [g["Name"] for g in read_stable(selected_export["OutputFile"])["Collections"]]
+            == ["空"],
+            "Selected collection.db export failed verification.",
+        )
+        full_export = export_collection_file(
+            capture_export(window.workspace), folder / "full collection.db"
+        )
+        require(full_export["Collections"] == 2, "Full collection.db export omitted a collection.")
+        require(
+            window.workspace.plan() == export_plan
+            and window.workspace.source_path == export_path
+            and window.workspace.dirty == export_dirty,
+            "Export changed the editing session.",
         )
         transfer = TransferDialog(window, source_id, [checksum, checksum.upper()])
         require(
@@ -322,6 +358,7 @@ def run_smoke(report_path):
             "Qt": qVersion(),
             "Frozen": bool(getattr(sys, "frozen", False)),
             "VersionedUpdateDownloadAndReplacement": True,
+            "SelectiveAndFullCollectionDbExport": True,
             "StableUiOpen": True,
             "CreditsAndLicenceDocuments": True,
             "UnicodePathsAndNames": True,

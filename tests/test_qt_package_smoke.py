@@ -71,4 +71,5 @@ def test_packaged_unicode_save_download_and_migration_under_windows_legacy_encod
     assert results["GameLibraryBrowseAddAndUndo"]
     assert results["SavedInventoryJsonReuseAndRestore"]
     assert results["VersionedUpdateDownloadAndReplacement"]
+    assert results["SelectiveAndFullCollectionDbExport"]
     assert len(native_calls) == 1

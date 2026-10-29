@@ -15,6 +15,10 @@ Python and .NET are bundled. Linux requires glibc 2.35+ and desktop system libra
 see [platform requirements and release assets](docs/releases.md). Releases also
 include checksums and one combined archive of matching sources and third-party notices.
 
+In the Qt client, **Export…** saves all or checked collections together in a single
+`collection.db`, from either stable or lazer sessions. Exports include current
+unsaved edits and keep the opened database and editing session unchanged.
+
 Portable builds check for newer stable GitHub releases in the background. Use
 **Tools → Check for updates… → Download and restart** to verify the download,
 close the client, replace its executable and reopen the current database.

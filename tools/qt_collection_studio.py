@@ -154,6 +154,7 @@ class StudioWindow(QMainWindow):
         tools = QMenu(self)
         tools.addAction("New collection.db", self.new_file)
         self.save_copy_action = tools.addAction("Save a copy…", self.save_copy)
+        self.export_action = tools.addAction("Export collection.db…", self.export_collections)
         tools.addSeparator()
         self.library_actions = [
             tools.addAction("Read osu!.db…", self.read_database),
@@ -169,10 +170,21 @@ class StudioWindow(QMainWindow):
         tools.addAction("About Collections Studio…", self.about)
         self.tools_button.setMenu(tools)
         self.save_button = button("Save", self.save, "primary")
+        self.export_button = button("Export…", self.export_collections)
+        self.export_button.setAccessibleName("Export collections to collection.db")
+        self.export_button.setToolTip(
+            "Export all or chosen collections together in one collection.db."
+        )
         self.save_button.setToolTip(
             "Save to the opened file after creating a dated backup in the same folder."
         )
-        for control in (self.open_button, self.import_button, self.tools_button, self.save_button):
+        for control in (
+            self.open_button,
+            self.import_button,
+            self.export_button,
+            self.tools_button,
+            self.save_button,
+        ):
             top.addWidget(control)
         outer.addLayout(top)
 
@@ -420,6 +432,9 @@ class StudioWindow(QMainWindow):
             loaded and (self.workspace.dirty or not self.workspace.source_path)
         )
         self.save_copy_action.setEnabled(loaded)
+        can_export = loaded and bool(self.workspace.collections)
+        self.export_action.setEnabled(can_export)
+        self.export_button.setEnabled(can_export)
         self.undo_button.setEnabled(loaded and self.workspace.can_undo)
         self.select_all_button.setEnabled(selected and self.map_model.rowCount() > 0)
         self.remove_button.setEnabled(selected and bool(self.maps.selectionModel().selectedRows()))
@@ -1123,6 +1138,56 @@ class StudioWindow(QMainWindow):
                 workspace, self.backend, new_path=new_path
             ),
             saved,
+            writing=True,
+        )
+
+    def export_collections(self):
+        if (
+            self.job
+            or self.download_dialog
+            or self.migration_dialog
+            or self.update_dialog
+            or not self.workspace
+            or not self.workspace.collections
+        ):
+            return
+        from tools.collection_exports import capture_export, export_collection_file
+        from tools.qt_export_dialog import ExportDialog
+
+        dialog = ExportDialog(self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        identifiers, destination = dialog.model.selected_ids(), dialog.destination
+        dialog.deleteLater()
+        if not accepted:
+            return
+        try:
+            snapshot = capture_export(self.workspace, identifiers)
+        except ValueError as error:
+            self.error(error)
+            return
+
+        def exported(report):
+            self._remember_directory(report["OutputFile"])
+            self.status.setText(
+                f"Exported {report['Collections']:,} collections and "
+                f"{report['Memberships']:,} difficulty entries. " + " ".join(report["Warnings"])
+            )
+            self.details.setPlainText(
+                "Exported: "
+                + report["OutputFile"]
+                + "\nVerified collection.db · SHA-256: "
+                + report["OutputSha256"]
+                + (
+                    "\nIncludes your unsaved collection edits."
+                    if report["IncludesUnsavedEdits"]
+                    else ""
+                )
+            )
+
+        self._task(
+            "Exporting and verifying collection.db…",
+            lambda _stop, _progress: export_collection_file(snapshot, destination),
+            exported,
             writing=True,
         )
 
