@@ -54,12 +54,8 @@ def create_appdir(binary, directory):
         "Exec=CollectionsStudio\nIcon=CollectionsStudio\nCategories=Game;Utility;\nTerminal=false\n",
         encoding="utf-8",
     )
-    (directory / "CollectionsStudio.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
-        '<rect width="128" height="128" rx="24" fill="#211d29"/>'
-        '<path d="M24 42 64 22l40 20-40 20zm0 22 40 20 40-20M24 86l40 20 40-20" '
-        'fill="none" stroke="#bba1e8" stroke-width="8" stroke-linejoin="round"/></svg>',
-        encoding="utf-8",
+    shutil.copy2(
+        ROOT / "desktop/assets/collections-studio.svg", directory / "CollectionsStudio.svg"
     )
 
 

@@ -23,7 +23,7 @@ from PySide6.QtCore import (  # noqa: E402
     QTimer,
     Slot,
 )
-from PySide6.QtGui import QAction, QKeySequence  # noqa: E402
+from PySide6.QtGui import QAction, QIcon, QKeySequence  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QAbstractItemView,
     QApplication,
@@ -93,6 +93,7 @@ class StudioWindow(QMainWindow):
         self.last_import_ids = set()
         self.download_dialog = self.migration_dialog = None
         self.credits_dialog = None
+        self.install_dialog = None
         self.osu_credentials_dialog = None
         self.osu_api_credentials = self.osu_api_lookup = None
         self.job = self.row_job = None
@@ -143,6 +144,11 @@ class StudioWindow(QMainWindow):
         self.update_notice = button("Update available", self.show_updates, "primary")
         self.update_notice.hide()
         top.addWidget(self.update_notice)
+        self.install_notice = button(
+            "Install for this user…", self.manage_installation, "navigation"
+        )
+        self.install_notice.hide()
+        top.addWidget(self.install_notice)
         self.open_button = button("Open…", self.open_file)
         self.import_button = QToolButton()
         self.import_button.setText("Import")
@@ -168,6 +174,8 @@ class StudioWindow(QMainWindow):
         self.download_action = tools.addAction("Get missing maps…", self.download_maps)
         self.migrate_action = tools.addAction("Migrate collections…", self.migrate_collections)
         tools.addSeparator()
+        if sys.platform == "linux":
+            tools.addAction("Install / uninstall…", self.manage_installation)
         tools.addAction("osu! API credentials…", self.show_osu_credentials)
         tools.addAction("Check for updates…", self.show_updates)
         tools.addAction("Credits and licences…", self.show_credits)
@@ -419,6 +427,7 @@ class StudioWindow(QMainWindow):
             or self.download_dialog is not None
             or self.migration_dialog is not None
             or self.update_dialog is not None
+            or self.install_dialog is not None
         )
         loaded = self.workspace is not None and not blocked
         selected = loaded and self.selected is not None
@@ -428,6 +437,7 @@ class StudioWindow(QMainWindow):
             widget.setEnabled(selected)
         self.open_button.setEnabled(not blocked)
         self.update_notice.setEnabled(not blocked)
+        self.install_notice.setEnabled(not blocked)
         self.tools_button.setEnabled(not blocked)
         self.collections.setEnabled(not blocked)
         self.download_action.setEnabled(loaded)
@@ -1325,6 +1335,41 @@ class StudioWindow(QMainWindow):
             self.settings.remove(key)
         self.settings.sync()
 
+    def refresh_install_button(self):
+        show = False
+        if sys.platform == "linux":
+            from tools.linux_install import installation, running_artifact, user_layout
+
+            try:
+                artifact = running_artifact()
+                layout = user_layout()
+                record = installation(layout)
+                show = artifact.path != layout.binary or record is None
+                self.install_notice.setText(
+                    "Manage installation…" if record else "Install for this user…"
+                )
+            except (OSError, ValueError):
+                pass
+        self.install_notice.setVisible(show)
+
+    def manage_installation(self):
+        if (
+            sys.platform != "linux"
+            or self._closed
+            or self.job
+            or self.download_dialog
+            or self.migration_dialog
+            or self.update_dialog
+        ):
+            return
+        if self.install_dialog:
+            self.install_dialog.raise_()
+            self.install_dialog.activateWindow()
+            return
+        from tools.qt_install_dialog import InstallationDialog
+
+        self._open_dialog("install_dialog", InstallationDialog(self))
+
     def show_osu_credentials(self):
         if self.download_dialog and self.download_dialog.job:
             self.status.setText("Cancel or finish the download before changing API credentials.")
@@ -1412,6 +1457,7 @@ class StudioWindow(QMainWindow):
             self.migration_dialog,
             self.update_dialog,
             self.osu_credentials_dialog,
+            self.install_dialog,
         ):
             if dialog is not None and not dialog._closed:
                 dialog.close()
@@ -1484,6 +1530,11 @@ def configure_appearance(app):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--manage-installation",
+        action="store_true",
+        help="Open per-user Linux install/uninstall controls",
+    )
     parser.add_argument("--file", help="Open a stable collection.db or copied client.realm")
     parser.add_argument("--self-test", action="store_true", help="Run disposable packaged checks")
     parser.add_argument("--report", type=Path, help="Write packaged self-test results here")
@@ -1506,6 +1557,11 @@ def main():
     app.setApplicationName("CollectionsStudioQt")
     app.setApplicationDisplayName(APP_TITLE)
     configure_appearance(app)
+    from tools.linux_install import icon_path
+
+    app.setWindowIcon(QIcon(str(icon_path())))
+    if sys.platform == "linux":
+        app.setDesktopFileName("collections-studio")
     if args.self_test:
         from tools.qt_package_smoke import run_smoke
 
@@ -1522,6 +1578,9 @@ def main():
     logging.getLogger("collections-studio").info("Collections Studio started on %s", sys.platform)
     window = StudioWindow()
     window.show()
+    window.refresh_install_button()
+    if args.manage_installation:
+        QTimer.singleShot(0, window.manage_installation)
     if args.finish_update:
         from tools.update_install import cleanup_update, confirm_startup
 

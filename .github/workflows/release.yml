@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - runner: [self-hosted, Windows, X64, collections-studio-windows]
@@ -211,7 +212,8 @@ jobs:
           cat > release-notes.md <<'NOTES'
           Windows: run CollectionsStudio-windows-x64.exe; no installer is needed.
           Linux: choose CollectionsStudio-linux-x64.AppImage or CollectionsStudio-linux-x64.
-          See LINUX_INSTALL.md for launch, desktop shortcut and update instructions.
+          Both Linux formats offer Tools → Install / uninstall… for per-user installation.
+          See LINUX_INSTALL.md for launch, desktop shortcut, uninstall and update instructions.
           The standalone binary retains automatic updates; this initial AppImage updates manually.
 
           Download only your platform's executable to run Collections Studio.

@@ -13,7 +13,7 @@ a = Analysis(
     pathex=[str(root)],
     # BINARY preserves the executable bit when the helper is unpacked on Linux.
     binaries=[(str(helper), "backend")],
-    datas=[(str(stage / "backend"), "backend"), (str(stage / "notices"), "notices"), (str(stage / "app-version.json"), ".")],
+    datas=[(str(stage / "backend"), "backend"), (str(stage / "notices"), "notices"), (str(stage / "app-version.json"), "."), (str(root / "desktop/assets/collections-studio.svg"), "assets")],
     hiddenimports=[],
     # Filter the optional GTK theme plugin before its transitive libraries are collected.
     hookspath=[str(root / "desktop" / "release-hooks")] if linux_release else [],

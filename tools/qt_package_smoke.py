@@ -50,6 +50,33 @@ def run_smoke(report_path):
             settings=QSettings(str(folder / "settings.ini"), QSettings.Format.IniFormat)
         )
         window.show()
+        from PySide6.QtGui import QIcon
+
+        from tools.linux_install import icon_path
+
+        require(not QIcon(str(icon_path())).pixmap(64, 64).isNull(), "Application icon is missing.")
+        if sys.platform == "linux" and getattr(sys, "frozen", False):
+            from tools.linux_install import Layout, install, running_artifact, uninstall
+
+            desktop = folder / "private Desktop"
+            desktop.mkdir()
+            layout = Layout(folder / "private install data", desktop)
+            artifact = running_artifact()
+            installed = install(layout, artifact, window.version, desktop=True)
+            require(
+                Path(installed["path"]).is_file(),
+                "Per-user installation did not create its executable.",
+            )
+            require(
+                layout.icon.is_file() and layout.desktop.is_file(),
+                "Installation shortcuts/icon are missing.",
+            )
+            removed = uninstall(layout)
+            require(
+                not removed["kept"] and not layout.binary.exists(),
+                "Uninstall left its managed executable behind.",
+            )
+            require(artifact.path.is_file(), "Uninstall changed the original portable file.")
         window.show_credits()
         require(window.credits_dialog is not None, "Credits viewer did not open.")
         tabs = window.credits_dialog.tabs
@@ -361,6 +388,9 @@ def run_smoke(report_path):
             "SelectiveAndFullCollectionDbExport": True,
             "StableUiOpen": True,
             "CreditsAndLicenceDocuments": True,
+            "ApplicationIconBundled": True,
+            "LinuxUserInstallAndUninstall": sys.platform == "linux"
+            and bool(getattr(sys, "frozen", False)),
             "UnicodePathsAndNames": True,
             "ImportDedupAndEmptyCollection": True,
             "CopyMoveDuplicateHandlingAndUndo": True,

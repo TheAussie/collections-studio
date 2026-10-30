@@ -118,3 +118,13 @@ rejects changed hashes and keeps existing archive verification. Tokens stay in m
 credentials are absent from settings, reports, logs and releases. Requests are spaced
 at least 1.05 seconds apart; rate-limit responses trigger a bounded cooldown. Successful
 lookups are cached for the session. Missing/deleted/old hashes can still be unavailable.
+
+## Built-in Linux installation (v0.1.5)
+
+The standalone binary and AppImage share **Tools → Install / uninstall…**, with an
+**Install for this user…** header button when running portably. It copies the app,
+installs the proper icon/menu entry and optionally creates a desktop shortcut.
+**Uninstall…** removes the managed installation while keeping collections, downloads,
+settings, API credentials and the original download. The current window stays open.
+No root access or background service is needed. See [Linux setup](docs/linux-install.md).
+Source Python checkouts cannot install the interpreter; use a packaged Linux build.
