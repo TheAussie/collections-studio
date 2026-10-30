@@ -160,3 +160,19 @@ References: [PyInstaller spec files](https://pyinstaller.org/en/stable/spec-file
 [LGPLv3 text included with Qt](https://github.com/qt/qtbase/blob/v6.12.0/LICENSES/LGPL-3.0-only.txt),
 [Qt licence requirements](https://www.qt.io/development/open-source-lgpl-obligations),
 and [GitHub workflow tokens](https://docs.github.com/actions/reference/authentication-in-a-workflow).
+
+## Additional Linux AppImage
+
+After staging the verified standalone binary, run
+`python desktop/package_appimage.py --input artifacts/release --cache /tmp/cs-appimage-cache`.
+This downloads checksum-pinned appimagetool/runtime sources, uses its matching runtime
+and runs the actual AppImage self-test under an isolated profile without FUSE.
+No package is installed system-wide. The release assembler validates the AppImage,
+its payload/source hashes and test receipt before including it and LINUX_INSTALL.md.
+The combined support ZIP retains AppImage runtime/dependency sources and notices.
+See docs/linux-install.md for startup cost, manual updates and runtime relinking.
+
+The pinned appimagetool includes desktop-file-validate and mksquashfs; the runner
+does not need separate packages for them. Build-tool/source downloads are
+checksum-pinned; no new system package is installed by the workflow. The initial
+AppImage intentionally uses manual updates.

@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +93,8 @@ class StudioWindow(QMainWindow):
         self.last_import_ids = set()
         self.download_dialog = self.migration_dialog = None
         self.credits_dialog = None
+        self.osu_credentials_dialog = None
+        self.osu_api_credentials = self.osu_api_lookup = None
         self.job = self.row_job = None
         self._closed = False
         self._writing = False
@@ -165,6 +168,7 @@ class StudioWindow(QMainWindow):
         self.download_action = tools.addAction("Get missing maps…", self.download_maps)
         self.migrate_action = tools.addAction("Migrate collections…", self.migrate_collections)
         tools.addSeparator()
+        tools.addAction("osu! API credentials…", self.show_osu_credentials)
         tools.addAction("Check for updates…", self.show_updates)
         tools.addAction("Credits and licences…", self.show_credits)
         tools.addAction("About Collections Studio…", self.about)
@@ -1321,6 +1325,19 @@ class StudioWindow(QMainWindow):
             self.settings.remove(key)
         self.settings.sync()
 
+    def show_osu_credentials(self):
+        if self.download_dialog and self.download_dialog.job:
+            self.status.setText("Cancel or finish the download before changing API credentials.")
+            return
+        current = getattr(self, "osu_credentials_dialog", None)
+        if current:
+            current.raise_()
+            current.activateWindow()
+            return
+        from tools.qt_osu_credentials import OsuCredentialsDialog
+
+        self._open_dialog("osu_credentials_dialog", OsuCredentialsDialog(self))
+
     def show_credits(self):
         try:
             if self.credits_dialog is None:
@@ -1332,7 +1349,7 @@ class StudioWindow(QMainWindow):
             self.error(str(error))
 
     def check_updates(self):
-        if self._closed or self.update_check_job:
+        if os.environ.get("COLLECTIONS_STUDIO_APPIMAGE") or self._closed or self.update_check_job:
             return
         version = self.version
         self.update_check_job = Job(lambda stop, _progress: check_for_update(version, stop=stop))
@@ -1353,6 +1370,14 @@ class StudioWindow(QMainWindow):
             self._controls()
 
     def show_updates(self):
+        if os.environ.get("COLLECTIONS_STUDIO_APPIMAGE"):
+            QMessageBox.information(
+                self,
+                "AppImage updates",
+                "Download the new AppImage from GitHub Releases, verify it, "
+                "close Collections Studio and replace the old AppImage. See LINUX_INSTALL.md.",
+            )
+            return
         if self.job or self.download_dialog or self.migration_dialog:
             return
         if self.update_dialog:
@@ -1382,7 +1407,12 @@ class StudioWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
-        for dialog in (self.download_dialog, self.migration_dialog, self.update_dialog):
+        for dialog in (
+            self.download_dialog,
+            self.migration_dialog,
+            self.update_dialog,
+            self.osu_credentials_dialog,
+        ):
             if dialog is not None and not dialog._closed:
                 dialog.close()
                 event.ignore()

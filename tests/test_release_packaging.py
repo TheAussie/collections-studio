@@ -307,3 +307,67 @@ def test_four_file_release_still_supports_verified_updater_downloads(
     checksum = download_update(info, download, client=Transport())
     assert checksum == package_release.digest(output / info.asset_name)
     assert (download / "download").read_bytes() == (output / info.asset_name).read_bytes()
+
+
+def add_appimage(inputs, monkeypatch):
+    image = inputs / "CollectionsStudio-linux-x64.AppImage"
+    image.write_bytes(b"\x7fELF synthetic AppImage")
+    sources = b"exact runtime source"
+    lock = {"sources": [{"name": "runtime.tar.gz", "sha256": hashlib.sha256(sources).hexdigest()}]}
+    (package_release.ROOT / "desktop/appimage.lock.json").write_text(json.dumps(lock))
+    (package_release.ROOT / "docs/linux-install.md").write_text("Install without root")
+    with zipfile.ZipFile(inputs / "CollectionsStudio-AppImage-support.zip", "x") as archive:
+        archive.writestr(
+            "build.json",
+            json.dumps(
+                {
+                    "ImageSha256": package_release.digest(image),
+                    "PayloadSha256": package_release.digest(inputs / "CollectionsStudio-linux-x64"),
+                }
+            ),
+        )
+        archive.writestr(
+            "packaged-self-test.json",
+            json.dumps({"Frozen": True, "CreditsAndLicenceDocuments": True}),
+        )
+        archive.writestr("appimage.lock.json", json.dumps(lock))
+        archive.writestr("sources/runtime.tar.gz", sources)
+    return image
+
+
+def test_appimage_adds_only_image_and_install_instructions_to_public_files(
+    release_inputs, tmp_path, monkeypatch
+):
+    image = add_appimage(release_inputs, monkeypatch)
+    output = tmp_path / "public"
+    package_release.assemble_release(release_inputs, output, require_appimage=True)
+    assert {p.name for p in output.iterdir()} == package_release.PUBLIC_ASSETS | {
+        image.name,
+        "LINUX_INSTALL.md",
+    }
+    assert (output / image.name).read_bytes() == image.read_bytes()
+    assert (output / "LINUX_INSTALL.md").read_text() == "Install without root"
+    with zipfile.ZipFile(output / package_release.SUPPORT_ARCHIVE) as archive:
+        assert (
+            archive.read("notices/CollectionsStudio-AppImage-support.zip")
+            == (release_inputs / "CollectionsStudio-AppImage-support.zip").read_bytes()
+        )
+    assert image.name in (output / "SHA256SUMS").read_text()
+
+
+@pytest.mark.parametrize("failure", ["no_image", "changed_image", "missing_support"])
+def test_appimage_workflow_rejects_missing_or_unverified_image(
+    release_inputs, tmp_path, monkeypatch, failure
+):
+    image = add_appimage(release_inputs, monkeypatch)
+    if failure == "no_image":
+        image.unlink()
+        (release_inputs / "CollectionsStudio-AppImage-support.zip").unlink()
+    elif failure == "changed_image":
+        image.write_bytes(b"Changed image")
+    else:
+        (release_inputs / "CollectionsStudio-AppImage-support.zip").unlink()
+    output = tmp_path / "public"
+    with pytest.raises(ValueError):
+        package_release.assemble_release(release_inputs, output, require_appimage=True)
+    assert not output.exists()

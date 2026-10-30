@@ -1,6 +1,6 @@
 [project]
 name = "collections-studio"
-version = "0.1.3"
+version = "0.1.4"
 description = "Desktop editor for osu!stable and osu!lazer collections"
 license = "MIT"
 license-files = ["LICENSE"]

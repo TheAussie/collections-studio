@@ -211,3 +211,13 @@ native helper's locked dependencies are listed below (across both supported RIDs
   actions — native builds and release artifact transfer. https://github.com/actions
 - Astral's setup-uv action — locked Python toolchain setup in CI.
   https://github.com/astral-sh/setup-uv
+
+### Optional official osu! API and AppImage
+
+The optional official metadata fallback uses the osu! API operated by ppy.
+https://osu.ppy.sh/docs/index.html#lookup-beatmap
+AppImage packaging uses appimagetool and the AppImage type-2 runtime. Their
+runtime/dependency licences appear in the AppImage's Credits and licences viewer;
+matching sources and notices are retained in the combined release support archive.
+https://github.com/AppImage/appimagetool
+https://github.com/AppImage/type2-runtime

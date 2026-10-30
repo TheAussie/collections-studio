@@ -42,6 +42,10 @@ def portable_target():
             "Automatic replacement is available in the portable executable. "
             "Source checkouts update through Git."
         )
+    if os.environ.get("COLLECTIONS_STUDIO_APPIMAGE"):
+        raise UpdateError(
+            "AppImage updates are manual: download and replace the AppImage after closing it."
+        )
     details = json.loads((Path(sys._MEIPASS) / "app-version.json").read_text(encoding="utf-8"))
     if details.get("format") != "onefile":
         raise UpdateError("Automatic replacement requires the single-file portable release.")

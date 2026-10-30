@@ -96,19 +96,26 @@ def write_checksums(directory):
     )
 
 
-def assemble_release(inputs, output):
+def assemble_release(inputs, output, require_appimage=False):
     """Publishable file set; retain every original source/notice archive byte-for-byte."""
     inputs, output = Path(inputs), Path(output)
     sources = json.loads((ROOT / "desktop/qt-sources.lock.json").read_text(encoding="utf-8"))
     source_names = {entry["Archive"] for entry in sources}
     notice_names = {f"CollectionsStudio-{rid}-notices.zip" for rid in EXECUTABLES}
     application_source = "CollectionsStudio-source.tar.gz"
+    appimage = "CollectionsStudio-linux-x64.AppImage"
+    appimage_support = "CollectionsStudio-AppImage-support.zip"
+    has_appimage = any((inputs / name).exists() for name in (appimage, appimage_support))
+    if require_appimage and not has_appimage:
+        raise ValueError("The release workflow requires its verified AppImage.")
     required = (
         {name for _, name in EXECUTABLES.values()}
         | source_names
         | notice_names
         | {application_source}
     )
+    if has_appimage:
+        required |= {appimage, appimage_support}
     if output.exists():
         raise ValueError("Choose an unused final release output directory.")
     if {p.name for p in inputs.iterdir()} != required or any(
@@ -160,14 +167,41 @@ def assemble_release(inputs, output):
                     raise ValueError(f"Missing matching native updater rehearsal for {rid}.")
     if len(versions) != 1:
         raise ValueError("Both release binaries must have the same application version.")
+    if has_appimage:
+        lock = json.loads((ROOT / "desktop/appimage.lock.json").read_text())
+        with zipfile.ZipFile(inputs / appimage_support) as support:
+            proof = json.loads(support.read("build.json"))
+            tested = json.loads(support.read("packaged-self-test.json"))
+            if (
+                proof.get("ImageSha256") != digest(inputs / appimage)
+                or proof.get("PayloadSha256") != digest(inputs / EXECUTABLES["linux-x64"][1])
+                or not tested.get("Frozen")
+                or not tested.get("CreditsAndLicenceDocuments")
+                or json.loads(support.read("appimage.lock.json")) != lock
+            ):
+                raise ValueError("AppImage inputs differ from their verified build.")
+            for entry in lock["sources"]:
+                if (
+                    hashlib.sha256(support.read("sources/" + entry["name"])).hexdigest()
+                    != entry["sha256"]
+                ):
+                    raise ValueError("AppImage corresponding sources changed.")
+        if not (ROOT / "docs/linux-install.md").is_file():
+            raise ValueError("Linux installation instructions are missing.")
     # Only create the public output after every platform/source check has passed.
     output.mkdir(parents=True)
     for _, name in EXECUTABLES.values():
         shutil.copy2(inputs / name, output / name)
     (output / EXECUTABLES["linux-x64"][1]).chmod(0o755)
+    if has_appimage:
+        shutil.copy2(inputs / appimage, output / appimage)
+        (output / appimage).chmod(0o755)
+        shutil.copy2(ROOT / "docs/linux-install.md", output / "LINUX_INSTALL.md")
     contents = {application_source: "application/" + application_source}
     contents.update({name: "libraries/" + name for name in source_names})
     contents.update({name: "notices/" + name for name in notice_names})
+    if has_appimage:
+        contents[appimage_support] = "notices/" + appimage_support
     with zipfile.ZipFile(output / SUPPORT_ARCHIVE, "x", compression=zipfile.ZIP_STORED) as bundle:
         bundle.writestr(
             "README.txt",
@@ -192,7 +226,8 @@ def assemble_release(inputs, output):
             ),
         )
     write_checksums(output)
-    if {p.name for p in output.iterdir()} != PUBLIC_ASSETS:
+    expected = PUBLIC_ASSETS | ({appimage, "LINUX_INSTALL.md"} if has_appimage else set())
+    if {p.name for p in output.iterdir()} != expected:
         raise ValueError("Unexpected files in the final public release output.")
     return output / SUPPORT_ARCHIVE
 
@@ -208,13 +243,14 @@ def main():
     checksum = commands.add_parser("checksums")
     checksum.add_argument("directory", type=Path)
     assemble = commands.add_parser("assemble")
+    assemble.add_argument("--require-appimage", action="store_true")
     assemble.add_argument("--input", type=Path, required=True)
     assemble.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "stage":
         print(stage_release(args.build, args.rid, args.output, args.include_qt_sources))
     elif args.command == "assemble":
-        print(assemble_release(args.input, args.output))
+        print(assemble_release(args.input, args.output, args.require_appimage))
     else:
         write_checksums(args.directory)
 

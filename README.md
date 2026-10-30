@@ -92,3 +92,29 @@ EXE and one Linux executable. There is no installer or AppImage. A manual workfl
 run produces artifacts; pushing a `v*` tag builds, self-tests and publishes a
 release after both platforms succeed. Matching source, third-party notices and
 checksums accompany the executables. See [release and rebuilding instructions](docs/releases.md).
+
+## Linux AppImage
+
+Linux releases additionally offer an AppImage alongside the standalone executable.
+See [Linux installation instructions](docs/linux-install.md), also included as
+LINUX_INSTALL.md in releases. The initial AppImage uses manual updates; the existing
+standalone updater is unchanged. Packaging alone does not resolve font/XKB compatibility.
+
+## Optional official osu! API fallback
+
+Use **Tools → osu! API credentials…** to enter your own OAuth client ID and secret
+(created at https://osu.ppy.sh/home/account/edit#oauth). This is not your osu! password.
+**Save and use** stores the pair in Windows Credential Manager or Linux Secret Service;
+**Use this session only** keeps it in memory. **Forget saved credentials** removes it.
+Linux needs an unlocked Secret Service provider (for example GNOME Keyring or a
+compatible KDE wallet) and `secret-tool`: Arch `sudo pacman -S libsecret`; Ubuntu
+`sudo apt install libsecret-tools`. The app does not install these or fall back to
+plaintext. You can always continue using mirrors or session-only credentials.
+
+In **Get missing maps**, enable **Use my osu! API credentials after mirror lookup fails**.
+It performs official exact-MD5 lookup with public client-credentials tokens, then
+downloads through your enabled mirrors. It applies no ranked/graveyard filter,
+rejects changed hashes and keeps existing archive verification. Tokens stay in memory;
+credentials are absent from settings, reports, logs and releases. Requests are spaced
+at least 1.05 seconds apart; rate-limit responses trigger a bounded cooldown. Successful
+lookups are cached for the session. Missing/deleted/old hashes can still be unavailable.

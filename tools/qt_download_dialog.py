@@ -153,6 +153,12 @@ class DownloadDialog(StudioDialog):
         layout.addWidget(
             label("MD5 lookup: " + ", ".join(m.name for m in self.mirrors if m.lookup))
         )
+        self.official_api = QCheckBox("Use my osu! API credentials after mirror lookup fails")
+        self.official_api.setChecked(
+            self.app.settings.value("downloads/use-official-api", False, type=bool)
+        )
+        layout.addWidget(self.official_api)
+        layout.addWidget(button("osu! API credentials…", self.app.show_osu_credentials))
         destination = QHBoxLayout()
         self.directory = QLineEdit(self.app.settings.value("downloads/directory", ""))
         self.directory.setPlaceholderText("Choose the folder for archives and the saved queue")
@@ -313,13 +319,29 @@ class DownloadDialog(StudioDialog):
         if not self.directory.text() or not directory.is_dir():
             self.status.setText("Choose an existing download folder first.")
             return
-        if not any(m.lookup for m in mirrors):
+        if not mirrors:
+            self.status.setText("Enable at least one download mirror.")
+            return
+        if not any(m.lookup for m in mirrors) and not self.official_api.isChecked():
             self.status.setText(
                 "Enable an MD5 lookup mirror: "
                 + ", ".join(m.name for m in self.mirrors if m.lookup)
             )
             return
         self.app.settings.setValue("downloads/directory", str(directory.resolve()))
+        self.app.settings.setValue("downloads/use-official-api", self.official_api.isChecked())
+        self.downloader.official_lookup = None
+        if self.official_api.isChecked():
+            from tools.osu_credentials import CredentialStore
+            from tools.osu_lookup import OfficialLookup
+
+            if getattr(self.app, "osu_api_lookup", None) is None:
+                self.app.osu_api_lookup = OfficialLookup(
+                    lambda: (
+                        getattr(self.app, "osu_api_credentials", None) or CredentialStore().load()
+                    )
+                )
+            self.downloader.official_lookup = self.app.osu_api_lookup
         self.downloader.mirrors = mirrors
         downloader, events, disposed = self.downloader, self.events, self.disposed
 

@@ -655,6 +655,7 @@ class Downloader:
         self.cooldowns = {}
         self.failures = {}
         self.report_dir = report_dir
+        self.official_lookup = None
 
     def _open(self, mirror, url, stop):
         _check_cancel(stop)
@@ -729,7 +730,15 @@ class Downloader:
                         "message": f"{mirror.name} lookup: {error}. Trying next mirror.",
                     }
                 )
-        raise DownloadError("No enabled lookup mirror could resolve this exact MD5.")
+        if self.official_lookup is not None:
+            emit({"kind": "item", "hash": checksum, "state": "Resolving", "mirror": "osu! API"})
+            try:
+                set_id, details = self.official_lookup.resolve(checksum, stop)
+                emit({"kind": "metadata", "hash": checksum, "details": details, "set_id": set_id})
+                return set_id, details
+            except DownloadError as error:
+                attempts.append({"stage": "lookup", "mirror": "osu! API", "error": str(error)})
+        raise DownloadError("No enabled lookup provider could resolve this exact MD5.")
 
     def _blocks(self, response, stop):
         started = self.now()

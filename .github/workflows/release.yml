@@ -115,6 +115,13 @@ jobs:
           --build "$RUNNER_TEMP/cs-build-${{ github.run_id }}-${{ github.run_attempt }}" --rid "${{ matrix.rid }}"
           --output artifacts/release ${{ matrix.source_args }}
 
+      - name: Package and self-test additional Linux AppImage
+        if: runner.os == 'Linux'
+        run: >-
+          uv run --frozen --extra desktop --extra desktop-build
+          python desktop/package_appimage.py --input artifacts/release
+          --cache "$RUNNER_TEMP/cs-appimage-cache"
+
       - name: Upload verified release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -155,20 +162,22 @@ jobs:
           merge-multiple: true
           path: release-inputs
 
-      - name: Assemble four public release files
+      - name: Assemble six public release files
         run: |
           git archive --format=tar.gz --prefix=CollectionsStudio/ \
             --output=release-inputs/CollectionsStudio-source.tar.gz HEAD
           uv run --no-project --python 3.12.14 python desktop/package_release.py assemble \
-            --input release-inputs --output release-assets
+            --input release-inputs --output release-assets --require-appimage
 
-      - name: Upload four assembled release files
+      - name: Upload six assembled release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: public-release
           path: |
             release-assets/CollectionsStudio-windows-x64.exe
             release-assets/CollectionsStudio-linux-x64
+            release-assets/CollectionsStudio-linux-x64.AppImage
+            release-assets/LINUX_INSTALL.md
             release-assets/SHA256SUMS
             release-assets/CollectionsStudio-sources-and-notices.zip
           if-no-files-found: error
@@ -187,7 +196,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Download four assembled release files
+      - name: Download six assembled release files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: public-release
@@ -201,7 +210,9 @@ jobs:
         run: |
           cat > release-notes.md <<'NOTES'
           Windows: run CollectionsStudio-windows-x64.exe; no installer is needed.
-          Linux: chmod +x CollectionsStudio-linux-x64, then run it directly; no AppImage is used.
+          Linux: choose CollectionsStudio-linux-x64.AppImage or CollectionsStudio-linux-x64.
+          See LINUX_INSTALL.md for launch, desktop shortcut and update instructions.
+          The standalone binary retains automatic updates; this initial AppImage updates manually.
 
           Download only your platform's executable to run Collections Studio.
           SHA256SUMS verifies the downloads and is used by the built-in updater.
@@ -219,6 +230,8 @@ jobs:
           assets=(
             release-assets/CollectionsStudio-windows-x64.exe
             release-assets/CollectionsStudio-linux-x64
+            release-assets/CollectionsStudio-linux-x64.AppImage
+            release-assets/LINUX_INSTALL.md
             release-assets/SHA256SUMS
             release-assets/CollectionsStudio-sources-and-notices.zip
           )
